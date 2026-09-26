@@ -75,7 +75,7 @@ tls_verify = true
 # "openai_image" generates one image per script keyword through any
 # OpenAI-compatible /images/generations endpoint (local ComfyUI/SD gateways
 # or cloud relays) and renders it into a video clip.
-video_source = "pexels"
+video_source = "asc_ai"
 
 # API key lists support key rotation. Use straight ASCII double quotes and
 # separate multiple keys with commas, for example: ["key-1", "key-2"].
@@ -433,7 +433,7 @@ mimo_tts_style_prompt = "请用自然、清晰、适合短视频旁白的语气�
 # Subtitle provider: "edge" or "whisper". Whisper is loaded only when selected
 # explicitly; Edge failures do not trigger an automatic Whisper model download.
 # Leave empty to skip generation.
-subtitle_provider = "edge"
+subtitle_provider = "whisper"
 
 # FFmpeg is normally downloaded and detected automatically. If detection fails,
 # download it from https://www.gyan.dev/ffmpeg/builds/ and set the executable.
@@ -507,7 +507,7 @@ upload_post_max_pending_tasks = 10
 [whisper]
 # The model is downloaded automatically on first use unless a matching local
 # directory exists at ./models/whisper-{model_size}.
-model_size = "large-v3"
+model_size = "large-v3-turbo"
 # device: "cpu" or "cuda". Common compute types include "int8" for CPU and
 # "float16" or "int8_float16" for CUDA.
 device = "cpu"
@@ -576,7 +576,7 @@ music_timeout = 600
 # travisvn/chatterbox-tts-api running locally on port 4123.
 base_url = "http://127.0.0.1:4123/v1"
 api_key = ""
-model_id = "chatterbox"
+model_id = "tts-1"
 # Voice names exposed by the configured Chatterbox server.
 voices = ["default-Female"]
 
@@ -626,6 +626,33 @@ model_id = ""
 voice_id = "default"
 
 # =============================================================================
+# ASC-AI Local Production
+# =============================================================================
+
+[asc_ai]
+enabled = true
+local_only = true
+prompt_intelligence_url = "http://127.0.0.1:8094"
+image_adapter_url = "http://127.0.0.1:8091"
+input_root = "/srv/ai-data/input"
+director_target_duration_seconds = 45
+director_scene_duration_seconds = 7
+director_max_local_video_scenes = 1
+director_timeout_seconds = 420
+director_style = "cinematic documentary realism, clean composition"
+image_workflow_id = "lustify_krea_v10_native_int8.v1"
+image_model_id = "mdl_diffusion_model_0505412ed2ac"
+image_steps = 8
+image_cfg = 1.0
+video_workflow_id = "wan22_ti2v_5b.v1"
+video_model_id = "mdl_diffusion_model_456f901338bd"
+video_profile = "STANDARD"
+video_duration_seconds = 5
+video_frames = 81
+video_fallback_to_image = true
+generation_timeout_seconds = 1800
+
+# =============================================================================
 # WebUI Preferences / WebUI 偏好
 # =============================================================================
 
@@ -641,7 +668,7 @@ open_task_folder_on_completion = true
 # below only when you want to define initial defaults manually.
 # Russian Edition starts in Russian; the WebUI can change and persist it later.
 language = "ru"
-# video_language = ""
+video_language = "ru-RU"
 # paragraph_number = 1
 # video_script_prompt = ""
 # custom_system_prompt = ""
@@ -655,9 +682,9 @@ language = "ru"
 # video_clip_duration = 3
 # video_clip_speed = 1.0
 # video_count = 1
-# tts_server = "azure-tts-v1"
-# voice_name = ""
-# voice_mode = "tts"                 # "tts", "upload", or "none"
+tts_server = "chatterbox"
+voice_name = "chatterbox:default-Female"
+voice_mode = "tts"                 # "tts", "upload", or "none"
 # voice_volume = 1.0
 # voice_rate = 1.0
 # bgm_type = "random"
