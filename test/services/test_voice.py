@@ -860,7 +860,7 @@ class TestVoiceService(unittest.TestCase):
 
         # with nothing configured the dropdown still gets a usable default
         with patch.object(vs.config, "chatterbox", {}):
-            self.assertEqual(vs.get_chatterbox_voices(), ["chatterbox:default-Female"])
+            self.assertEqual(vs.get_chatterbox_voices(), ["chatterbox:ru-default"])
 
     def test_chatterbox_tts_posts_to_openai_compatible_endpoint(self):
         """Success path: POST /audio/speech, write audio, return legacy SubMaker."""
