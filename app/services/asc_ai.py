@@ -355,6 +355,13 @@ def create_director_plan(
                 timeout=float(_setting("character_hub_timeout_seconds", 10)),
             )
         director_settings = dict(config.asc_ai)
+        task_research_override = getattr(
+            params, "director_public_research_enabled", None
+        )
+        if task_research_override is not None:
+            director_settings["public_research_enabled"] = bool(
+                task_research_override
+            )
         if settings_overrides:
             director_settings.update(settings_overrides)
         plan = asc_ai_director.create_plan(
