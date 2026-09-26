@@ -582,6 +582,9 @@ project_description = _cfg.get(
 project_version = _cfg.get("project_version", __version__)
 reload_debug = False
 
+_redis_enabled_env = os.getenv("MPT_APP_ENABLE_REDIS", "").strip().lower()
+if _redis_enabled_env:
+    app["enable_redis"] = _redis_enabled_env in {"1", "true", "yes", "on"}
 app["redis_host"] = os.getenv(
     "MPT_APP_REDIS_HOST",
     os.getenv("REDIS_HOST", app.get("redis_host", "localhost")),
