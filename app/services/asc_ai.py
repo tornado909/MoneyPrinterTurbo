@@ -1030,13 +1030,18 @@ def generate_scene_materials(
                 0, int(_setting("qc_max_image_regenerations", 1))
             )
             for attempt in range(max_regenerations + 1):
-                image_path = generate_image(
+                image_result = generate_image(
                     task_id,
                     working_scene,
                     aspect,
                     attempt=attempt + 1,
                     binding=scene_binding,
+                    return_execution=True,
                 )
+                if isinstance(image_result, tuple):
+                    image_path, image_execution = image_result
+                else:
+                    image_path, image_execution = image_result, None
                 image_qc = quality_control(
                     task_id, working_scene, image_path, media_kind="image"
                 )
@@ -1046,6 +1051,7 @@ def generate_scene_materials(
                         "path": image_path,
                         "prompt": working_scene.get("visual_prompt"),
                         "qc": image_qc,
+                        "execution": image_execution,
                     }
                 )
                 persist_production_manifest(task_id, manifest)
@@ -1119,13 +1125,19 @@ def generate_scene_materials(
                     )
                 else:
                     try:
-                        candidate_video = generate_video_from_image(
+                        candidate_result = generate_video_from_image(
                             task_id,
                             working_scene,
                             image_path,
                             binding=video_capability["binding"],
+                            return_execution=True,
                         )
+                        if isinstance(candidate_result, tuple):
+                            candidate_video, video_execution = candidate_result
+                        else:
+                            candidate_video, video_execution = candidate_result, None
                         video_record["candidate_path"] = candidate_video
+                        video_record["execution"] = video_execution
                         video_qc = quality_control(
                             task_id,
                             working_scene,
