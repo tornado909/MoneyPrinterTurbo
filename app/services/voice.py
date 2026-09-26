@@ -2162,11 +2162,12 @@ def _openai_compatible_tts(
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    native_format = "wav" if provider == "chatterbox" else "mp3"
     payload = {
         "model": model_id,
         "input": text,
         "voice": voice,
-        "response_format": "mp3",
+        "response_format": native_format,
         # OpenAI speech API accepts speed 0.25-4.0; MoneyPrinterTurbo's rate is a
         # 1.0-centred multiplier, so it maps directly (clamped to the valid range).
         "speed": max(0.25, min(4.0, float(voice_rate or 1.0))),
@@ -2194,7 +2195,7 @@ def _openai_compatible_tts(
             # 已有试听/配音；先关闭文件再解码和替换，兼容 Windows 文件占用规则。
             with tempfile.NamedTemporaryFile(
                 dir=os.path.dirname(os.path.abspath(voice_file)),
-                suffix=".mp3", delete=False,
+                suffix=f".{native_format}", delete=False,
             ) as f:
                 temporary_audio = f.name
                 f.write(response.content)
