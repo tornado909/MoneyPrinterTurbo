@@ -113,6 +113,63 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertIn("chatterbox_tts", names)
         self.assertNotIn("azure-tts-v1", names)
 
+    @patch("app.services.asc_ai._request_json")
+    def test_chatterbox_voice_preflight_requires_installed_matching_language(
+        self, request_json
+    ):
+        request_json.return_value = {
+            "voices": [
+                {
+                    "name": "ru-default",
+                    "language": "ru",
+                    "aliases": ["russian"],
+                }
+            ]
+        }
+        info = asc_ai._chatterbox_voice_info(
+            self.params(
+                video_language="ru-RU",
+                voice_name="chatterbox:ru-default",
+            )
+        )
+        self.assertEqual(info["name"], "ru-default")
+        self.assertEqual(info["language"], "ru")
+        self.assertTrue(
+            request_json.call_args.args[1].endswith("/v1/voices")
+        )
+
+    @patch("app.services.asc_ai._request_json")
+    def test_chatterbox_voice_preflight_rejects_missing_voice(self, request_json):
+        request_json.return_value = {"voices": []}
+        with self.assertRaisesRegex(asc_ai.AscAIError, "is not installed"):
+            asc_ai._chatterbox_voice_info(
+                self.params(
+                    video_language="ru-RU",
+                    voice_name="chatterbox:ru-default",
+                )
+            )
+
+    @patch("app.services.asc_ai._request_json")
+    def test_chatterbox_voice_preflight_rejects_language_mismatch(
+        self, request_json
+    ):
+        request_json.return_value = {
+            "voices": [
+                {
+                    "name": "ru-default",
+                    "language": "en",
+                    "aliases": [],
+                }
+            ]
+        }
+        with self.assertRaisesRegex(asc_ai.AscAIError, "does not match"):
+            asc_ai._chatterbox_voice_info(
+                self.params(
+                    video_language="ru-RU",
+                    voice_name="chatterbox:ru-default",
+                )
+            )
+
     @patch("app.services.asc_ai._component_health", return_value={"status": "ok"})
     def test_custom_audio_preflight_does_not_require_tts(self, health):
         params = self.params(custom_audio_file="voice.wav")
