@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -219,6 +220,82 @@ class TestAscAIIntegration(unittest.TestCase):
         urls = [call.args[1] for call in request.call_args_list]
         self.assertIn("http://scheduler:8090/api/v1/leases/request", urls)
         self.assertIn("http://prompt-llm:8080/v1/chat/completions", urls)
+
+    def test_production_manifest_survives_unavailable_video_workflow(self):
+        with tempfile.TemporaryDirectory() as temp_dir, (
+            patch.object(asc_ai.utils, "task_dir", return_value=temp_dir),
+            patch.object(
+                asc_ai,
+                "_image_binding",
+                return_value={
+                    "workflow_id": "image-v1",
+                    "model_id": "image-model",
+                    "default_resolution": "1024x1024",
+                },
+            ),
+            patch.object(
+                asc_ai,
+                "_video_binding",
+                side_effect=asc_ai.AscAIError("no Wan workflow"),
+            ),
+            patch.object(
+                asc_ai,
+                "generate_image",
+                return_value=str(Path(temp_dir) / "image.png"),
+            ),
+            patch.object(
+                asc_ai,
+                "quality_control",
+                return_value={
+                    "passed": True,
+                    "technical_status": "valid",
+                    "technical_score": 1.0,
+                    "semantic_score": None,
+                    "issues": [],
+                    "retry_prompt": "",
+                },
+            ),
+            patch.object(
+                asc_ai,
+                "generate_video_from_image",
+                side_effect=asc_ai.AscAIError("video unavailable"),
+            ),
+            patch.object(
+                asc_ai.video,
+                "render_image_zoom_video",
+                return_value=str(Path(temp_dir) / "fallback.mp4"),
+            ),
+        ):
+            paths = asc_ai.generate_scene_materials(
+                task_id="task",
+                plan={
+                    "schema_version": "mpt.director.v2",
+                    "director_provider": "asc-ai-local-qwen3",
+                    "gpu_policy": "scheduler_managed",
+                    "scenes": [
+                        {
+                            "scene_id": "scene_01",
+                            "visual_strategy": "LOCAL_VIDEO",
+                            "visual_prompt": "greenhouse",
+                            "motion_prompt": "slow push in",
+                        }
+                    ],
+                },
+                audio_duration=4.0,
+                aspect="9:16",
+                clip_duration=5,
+            )
+            self.assertEqual(paths, [str(Path(temp_dir) / "fallback.mp4")])
+            manifest = json.loads(
+                (Path(temp_dir) / "production-manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(manifest["status"], "complete")
+            self.assertFalse(manifest["workflow_snapshot"]["video"]["available"])
+            self.assertEqual(
+                manifest["scenes"][0]["fallback"], "video_generation_failed"
+            )
 
     @patch("app.services.asc_ai._workflow_catalog")
     def test_runtime_catalog_binding_uses_catalog_model(self, catalog):
