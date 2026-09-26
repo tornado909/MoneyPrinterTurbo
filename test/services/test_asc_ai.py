@@ -73,3 +73,51 @@ class TestAscAIIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    @patch("app.services.asc_ai._request_json")
+    @patch("app.services.asc_ai.stage_for_qc", return_value="moneyprinterturbo/task/qc/scene.png")
+    def test_quality_control_requires_local_egress_contract(self, _stage, request_json):
+        request_json.return_value = {
+            "external_egress": False,
+            "provider": "local-qwen3-vl",
+            "provider_model": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "production_qc": {
+                "visual_summary": "greenhouse",
+                "semantic_score": 0.91,
+                "technical_score": 0.95,
+                "catastrophic_artifacts": False,
+                "issues": [],
+                "retry_prompt": "",
+                "confidence": 0.9,
+            },
+        }
+        scene = {"scene_id": "scene_01", "visual_prompt": "greenhouse"}
+        result = asc_ai.quality_control(
+            "task", scene, "/tmp/unused.png", media_kind="image"
+        )
+        self.assertTrue(result["passed"])
+        self.assertFalse(result["skipped"])
+
+        request_json.return_value["external_egress"] = True
+        with self.assertRaisesRegex(asc_ai.AscAIError, "egress"):
+            asc_ai.quality_control(
+                "task", scene, "/tmp/unused.png", media_kind="image"
+            )
+
+    @patch("app.services.asc_ai._workflow_catalog")
+    def test_runtime_catalog_binding_uses_catalog_model(self, catalog):
+        catalog.return_value = [
+            {
+                "workflow_id": "wan_i2v_default.v1",
+                "purpose": "image_to_video",
+                "model_id": "mdl_diffusion_model_runtime",
+                "operator_only": False,
+                "validation_state": "production",
+                "default_resolution": "640x640",
+                "defaults": {"length": 89},
+            }
+        ]
+        row = asc_ai._video_binding()
+        self.assertEqual(row["model_id"], "mdl_diffusion_model_runtime")
+        self.assertEqual(row["defaults"]["length"], 89)
