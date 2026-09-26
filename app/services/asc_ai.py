@@ -555,6 +555,17 @@ def quality_control(
         raise AscAIError(str(exc)) from exc
 
 
+def persist_production_manifest(task_id: str, manifest: dict) -> str:
+    target = Path(utils.task_dir(task_id)) / "production-manifest.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".json.partial")
+    temporary.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    os.replace(temporary, target)
+    return str(target)
+
+
 def generate_scene_materials(
     task_id: str,
     plan: dict,
@@ -565,84 +576,178 @@ def generate_scene_materials(
     scenes = list(plan.get("scenes") or [])
     if not scenes:
         raise AscAIError("Director plan has no scenes")
+
     paths: list[str] = []
     covered = 0.0
     required = max(float(audio_duration or 0), 0.1)
     clip_seconds = max(1, int(clip_duration or 5))
-    for scene in scenes:
-        working_scene = dict(scene)
-        image_path = ""
-        image_qc = None
-        max_regenerations = max(0, int(_setting("qc_max_image_regenerations", 1)))
-        for attempt in range(max_regenerations + 1):
-            image_path = generate_image(task_id, working_scene, aspect)
-            image_qc = quality_control(
-                task_id, working_scene, image_path, media_kind="image"
+    manifest = {
+        "schema_version": "mpt.production.v1",
+        "task_id": task_id,
+        "local_only": local_only(),
+        "audio_duration_seconds": required,
+        "clip_duration_seconds": clip_seconds,
+        "director": {
+            "schema_version": plan.get("schema_version"),
+            "provider": plan.get("director_provider"),
+            "gpu_policy": plan.get("gpu_policy"),
+            "production_notes": plan.get("production_notes") or [],
+        },
+        "workflow_snapshot": {
+            "image": _image_binding(),
+            "video": _video_binding()
+            if any(
+                row.get("visual_strategy") == "LOCAL_VIDEO" for row in scenes
             )
-            if image_qc.get("passed"):
-                break
-            if attempt < max_regenerations:
-                retry_prompt = str(image_qc.get("retry_prompt") or "").strip()
-                if retry_prompt:
-                    working_scene["visual_prompt"] = retry_prompt
-                logger.warning(
-                    "ASC-AI image QC requested one local regeneration: "
-                    f"scene={scene.get('scene_id')}, "
-                    f"semantic={image_qc.get('semantic_score')}, "
-                    f"technical={image_qc.get('technical_score')}"
-                )
-        if not image_qc or not image_qc.get("passed"):
-            if bool(_setting("qc_required", True)):
-                issues = ", ".join((image_qc or {}).get("issues") or [])
-                raise AscAIError(
-                    "ASC-AI image failed local production QC: "
-                    f"scene={scene.get('scene_id')}, issues={issues or 'score below threshold'}"
-                )
-            logger.warning(
-                f"ASC-AI image QC did not pass but qc_required=false: "
-                f"scene={scene.get('scene_id')}"
-            )
+            else None,
+        },
+        "scenes": [],
+        "outputs": [],
+        "status": "running",
+    }
+    persist_production_manifest(task_id, manifest)
 
-        output_path = ""
-        if scene.get("visual_strategy") == "LOCAL_VIDEO":
-            try:
-                candidate_video = generate_video_from_image(
-                    task_id, working_scene, image_path
+    try:
+        for scene in scenes:
+            working_scene = dict(scene)
+            scene_record = {
+                "scene_id": scene.get("scene_id"),
+                "requested_strategy": scene.get("visual_strategy"),
+                "visual_prompt": scene.get("visual_prompt"),
+                "motion_prompt": scene.get("motion_prompt"),
+                "image_attempts": [],
+                "video": None,
+                "fallback": None,
+                "final_output": None,
+            }
+            manifest["scenes"].append(scene_record)
+            persist_production_manifest(task_id, manifest)
+
+            image_path = ""
+            image_qc = None
+            max_regenerations = max(
+                0, int(_setting("qc_max_image_regenerations", 1))
+            )
+            for attempt in range(max_regenerations + 1):
+                image_path = generate_image(task_id, working_scene, aspect)
+                image_qc = quality_control(
+                    task_id, working_scene, image_path, media_kind="image"
                 )
-                video_qc = quality_control(
-                    task_id, working_scene, candidate_video, media_kind="video"
+                scene_record["image_attempts"].append(
+                    {
+                        "attempt": attempt + 1,
+                        "path": image_path,
+                        "prompt": working_scene.get("visual_prompt"),
+                        "qc": image_qc,
+                    }
                 )
-                if video_qc.get("passed"):
-                    output_path = candidate_video
-                else:
+                persist_production_manifest(task_id, manifest)
+                if image_qc.get("passed"):
+                    break
+                if attempt < max_regenerations:
+                    retry_prompt = str(
+                        image_qc.get("retry_prompt") or ""
+                    ).strip()
+                    if retry_prompt:
+                        working_scene["visual_prompt"] = retry_prompt
                     logger.warning(
-                        "ASC-AI local video failed production QC; using the "
-                        "already-approved still instead: "
+                        "ASC-AI image QC requested one local regeneration: "
                         f"scene={scene.get('scene_id')}, "
-                        f"semantic={video_qc.get('semantic_score')}, "
-                        f"technical={video_qc.get('technical_score')}"
+                        f"technical={image_qc.get('technical_score')}"
                     )
-            except Exception as exc:
-                if not bool(_setting("video_fallback_to_image", True)):
-                    raise
-                logger.warning(
-                    "ASC-AI local video failed; falling back to generated still: "
-                    f"scene={scene.get('scene_id')}, error={type(exc).__name__}"
-                )
-        if not output_path:
-            output_path = video.render_image_zoom_video(
-                image_path, clip_seconds
-            )
-        if not output_path:
-            raise AscAIError(
-                f"failed to render ASC-AI scene "
-                f"{scene.get('scene_id') or '<unknown>'}"
-            )
-        paths.append(output_path)
-        covered += clip_seconds
-        if covered >= required:
-            break
 
-    if not paths:
-        raise AscAIError("ASC-AI Director produced no usable visual materials")
-    return paths
+            if not image_qc or not image_qc.get("passed"):
+                if bool(_setting("qc_required", True)):
+                    issues = ", ".join(
+                        (image_qc or {}).get("issues") or []
+                    )
+                    raise AscAIError(
+                        "ASC-AI image failed local production QC: "
+                        f"scene={scene.get('scene_id')}, "
+                        f"issues={issues or 'technical QC failed'}"
+                    )
+                logger.warning(
+                    "ASC-AI image QC did not pass but qc_required=false: "
+                    f"scene={scene.get('scene_id')}"
+                )
+
+            output_path = ""
+            if scene.get("visual_strategy") == "LOCAL_VIDEO":
+                video_record = {
+                    "candidate_path": None,
+                    "qc": None,
+                    "error": None,
+                }
+                scene_record["video"] = video_record
+                try:
+                    candidate_video = generate_video_from_image(
+                        task_id, working_scene, image_path
+                    )
+                    video_record["candidate_path"] = candidate_video
+                    video_qc = quality_control(
+                        task_id,
+                        working_scene,
+                        candidate_video,
+                        media_kind="video",
+                    )
+                    video_record["qc"] = video_qc
+                    if video_qc.get("passed"):
+                        output_path = candidate_video
+                    else:
+                        scene_record["fallback"] = "video_qc_failed"
+                        logger.warning(
+                            "ASC-AI local video failed production QC; using "
+                            "the already-approved still instead: "
+                            f"scene={scene.get('scene_id')}, "
+                            f"technical={video_qc.get('technical_score')}"
+                        )
+                except Exception as exc:
+                    video_record["error"] = (
+                        f"{type(exc).__name__}: {str(exc)[:500]}"
+                    )
+                    if not bool(_setting("video_fallback_to_image", True)):
+                        raise
+                    scene_record["fallback"] = "video_generation_failed"
+                    logger.warning(
+                        "ASC-AI local video failed; falling back to "
+                        "generated still: "
+                        f"scene={scene.get('scene_id')}, "
+                        f"error={type(exc).__name__}"
+                    )
+                persist_production_manifest(task_id, manifest)
+
+            if not output_path:
+                output_path = video.render_image_zoom_video(
+                    image_path, clip_seconds
+                )
+                if scene.get("visual_strategy") == "LOCAL_VIDEO" and not scene_record["fallback"]:
+                    scene_record["fallback"] = "video_not_selected"
+            if not output_path:
+                raise AscAIError(
+                    "failed to render ASC-AI scene "
+                    f"{scene.get('scene_id') or '<unknown>'}"
+                )
+
+            scene_record["final_output"] = output_path
+            paths.append(output_path)
+            manifest["outputs"] = list(paths)
+            covered += clip_seconds
+            persist_production_manifest(task_id, manifest)
+            if covered >= required:
+                break
+
+        if not paths:
+            raise AscAIError(
+                "ASC-AI Director produced no usable visual materials"
+            )
+
+        manifest["status"] = "complete"
+        manifest["covered_seconds"] = covered
+        persist_production_manifest(task_id, manifest)
+        return paths
+    except Exception as exc:
+        manifest["status"] = "failed"
+        manifest["error"] = f"{type(exc).__name__}: {str(exc)[:1000]}"
+        manifest["outputs"] = list(paths)
+        persist_production_manifest(task_id, manifest)
+        raise
