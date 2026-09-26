@@ -237,6 +237,65 @@ def _effective_audio_policy(params=None) -> tuple[str, str, str]:
     return voice_mode, tts_server, custom_audio
 
 
+def _chatterbox_voice_info(params=None) -> dict:
+    voice_name = str(
+        getattr(params, "voice_name", "") if params is not None else ""
+    ).strip()
+    if voice_name.startswith("chatterbox:"):
+        voice_name = voice_name.split(":", 1)[1].strip()
+    if not voice_name:
+        voice_name = str(
+            config.chatterbox.get("default_voice", "ru-default") or "ru-default"
+        ).strip()
+
+    payload = _request_json(
+        "GET",
+        _chatterbox_root_url() + "/v1/voices",
+        timeout=(3, 10),
+    )
+    voices = payload.get("voices") or []
+    if not isinstance(voices, list):
+        raise AscAIError("Chatterbox voice catalog returned an invalid response")
+
+    selected = None
+    for row in voices:
+        if not isinstance(row, dict):
+            continue
+        aliases = [
+            str(value or "").strip()
+            for value in (row.get("aliases") or [])
+            if str(value or "").strip()
+        ]
+        if voice_name == str(row.get("name") or "").strip() or voice_name in aliases:
+            selected = row
+            break
+    if not selected:
+        raise AscAIError(
+            f"Chatterbox voice '{voice_name}' is not installed; upload a local "
+            "voice to /v1/voices before production"
+        )
+
+    requested_language = str(
+        getattr(params, "video_language", "") if params is not None else ""
+    ).split("-", 1)[0].lower().strip()
+    voice_language = str(selected.get("language") or "").lower().strip()
+    if (
+        requested_language
+        and requested_language not in {"auto", "default"}
+        and voice_language
+        and requested_language != voice_language
+    ):
+        raise AscAIError(
+            f"Chatterbox voice '{voice_name}' language={voice_language} does not "
+            f"match requested video language={requested_language}"
+        )
+    return {
+        "name": str(selected.get("name") or voice_name),
+        "language": voice_language or None,
+        "aliases": selected.get("aliases") or [],
+    }
+
+
 def _component_health(name: str, url: str) -> dict:
     result = _request_json("GET", url, timeout=(3, 10))
     status = str(result.get("status") or "").lower()
@@ -297,6 +356,8 @@ def health(params=None, *, stop_at: str = "video") -> dict:
             continue
         seen.add(name)
         result[name] = _component_health(name, url)
+    if "chatterbox_tts" in seen:
+        result["chatterbox_voice"] = _chatterbox_voice_info(params)
     return result
 
 
