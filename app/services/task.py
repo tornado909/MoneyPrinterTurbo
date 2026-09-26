@@ -1410,7 +1410,7 @@ def _run_pipeline(
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=5)
 
     try:
-        asc_ai.preflight(params)
+        asc_ai.preflight(params, stop_at=stop_at)
     except asc_ai.AscAIError as exc:
         return _mark_task_failed(task_id, "preflight", str(exc))
 
