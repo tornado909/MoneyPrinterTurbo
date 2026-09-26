@@ -97,7 +97,7 @@ config_file = os.path.join(root_dir, "webui", ".streamlit", "webui.toml")
 # 项目真正支持的语言；自动识别结果只进入当前会话，不修改全局配置。
 locales = utils.load_locales(i18n_dir)
 DEFAULT_CHATTERBOX_BASE_URL = "http://127.0.0.1:4123/v1"
-DEFAULT_CHATTERBOX_MODEL = "chatterbox"
+DEFAULT_CHATTERBOX_MODEL = "tts-1"
 DEFAULT_CHATTERBOX_VOICES = ["default-Female"]
 DEFAULT_KOKORO_BASE_URL = "http://127.0.0.1:8880/v1"
 DEFAULT_KOKORO_MODEL = "kokoro"
@@ -126,6 +126,7 @@ LOOMLOOM_MAX_POLL_FAILURES = 5
 VIDEO_SOURCE_GROUPS = {
     "stock_video": ("pexels", "pixabay", "coverr"),
     "ai_video": (
+        "asc_ai",
         "metaso_minimax",
         "ofox",
         "loomloom",
@@ -5088,6 +5089,7 @@ def _render_video_settings(panel, params):
                 (tr("Random"), "random"),
             ]
             video_source_labels = {
+                "asc_ai": tr("ASC-AI Director"),
                 "pexels": tr("Pexels"),
                 "pixabay": tr("Pixabay"),
                 "coverr": tr("Coverr"),
@@ -5101,7 +5103,7 @@ def _render_video_settings(panel, params):
                 "local": tr("Local file"),
             }
             saved_video_source_name = str(
-                config.app.get("video_source", "pexels") or "pexels"
+                config.app.get("video_source", "asc_ai") or "asc_ai"
             )
             params.video_source = grouped_selectbox(
                 tr("Video Source"),
@@ -5127,6 +5129,8 @@ def _render_video_settings(panel, params):
                     _effective_loomloom_api_token()
                 )
 
+            if params.video_source == "asc_ai":
+                st.caption(tr("ASC-AI Director Help"))
             if params.video_source == "wavespeed":
                 st.caption(tr("WaveSpeed AI Video Help"))
             if params.video_source == "volcengine_seedance":
