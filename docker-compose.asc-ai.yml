@@ -8,6 +8,7 @@ x-asc-ai-env: &asc-ai-env
   ASC_AI_PROMPT_URL: http://prompt-intelligence:8094
   ASC_AI_IMAGE_ADAPTER_URL: http://image-adapter:8091
   ASC_AI_VISUAL_ANALYZER_URL: http://visual-analyzer:8095
+  ASC_AI_CHARACTER_HUB_URL: http://character-chat:8096
   ASC_AI_SCHEDULER_URL: http://gpu-scheduler:8090
   ASC_AI_PROMPT_LLM_URL: http://prompt-llm-local:8080
   # Run the official local Chatterbox OpenAI-compatible server on host port
