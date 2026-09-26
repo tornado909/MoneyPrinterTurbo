@@ -530,10 +530,12 @@ def generate_audio(
             return reusable_preview
 
         logger.info("no custom audio file provided, using TTS to generate audio.")
-        audio_file = path.join(utils.task_dir(task_id), "audio.mp3")
+        parsed_voice_name = voice.parse_voice_name(params.voice_name)
+        audio_extension = ".wav" if voice.is_chatterbox_voice(parsed_voice_name) else ".mp3"
+        audio_file = path.join(utils.task_dir(task_id), f"audio{audio_extension}")
         tts_kwargs = {
             "text": video_script,
-            "voice_name": voice.parse_voice_name(params.voice_name),
+            "voice_name": parsed_voice_name,
             "voice_rate": params.voice_rate,
             "voice_file": audio_file,
         }
