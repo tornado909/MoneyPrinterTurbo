@@ -26,6 +26,11 @@ class TestAscAIController(unittest.TestCase):
         )
         self.assertTrue(data["director"]["scheduler_managed"])
         self.assertTrue(data["video"]["aspect_compatibility_gate"])
+        self.assertEqual(
+            data["production"]["submit_endpoint"],
+            "/api/v1/asc-ai/production",
+        )
+        self.assertTrue(data["production"]["uses_shared_task_manager"])
 
     @patch.object(
         asc_ai_controller.asc_ai,
@@ -93,6 +98,73 @@ class TestAscAIController(unittest.TestCase):
             create_plan.call_args.kwargs["settings_overrides"],
             {"public_research_enabled": False},
         )
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    def test_production_endpoint_maps_to_shared_video_task_queue(
+        self, preflight, create_task
+    ):
+        create_task.return_value = {
+            "status": 200,
+            "message": "success",
+            "data": {"task_id": "task-123"},
+        }
+
+        response = self.client.post(
+            "/api/v1/asc-ai/production",
+            json={
+                "video_subject": "Как устроена современная теплица",
+                "video_script": "",
+                "video_language": "ru-RU",
+                "video_aspect": "9:16",
+                "target_duration_seconds": 35,
+                "max_local_video_scenes": 1,
+                "style": "cinematic realistic greenhouse documentary",
+                "audience": "агрономы",
+                "purpose": "обучающий ролик",
+                "character_id": "aria",
+                "public_research_enabled": False,
+                "subtitle_enabled": True,
+                "bgm_type": "random",
+                "bgm_volume": 0.15,
+                "video_count": 1,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["task_id"], "task-123")
+        task_request = preflight.call_args.args[0]
+        self.assertEqual(task_request.video_source, "asc_ai")
+        self.assertTrue(task_request.director_enabled)
+        self.assertEqual(task_request.director_target_duration_seconds, 35)
+        self.assertEqual(task_request.director_character_id, "aria")
+        self.assertFalse(task_request.director_public_research_enabled)
+        self.assertEqual(task_request.bgm_type, "random")
+        self.assertTrue(task_request.subtitle_enabled)
+        preflight.assert_called_once()
+        self.assertEqual(preflight.call_args.kwargs["stop_at"], "video")
+        create_task.assert_called_once()
+        self.assertIs(create_task.call_args.args[1], task_request)
+        self.assertEqual(create_task.call_args.kwargs["stop_at"], "video")
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(
+        asc_ai_controller.asc_ai,
+        "preflight",
+        side_effect=asc_ai_controller.asc_ai.AscAIError("scheduler unavailable"),
+    )
+    def test_production_endpoint_does_not_queue_when_preflight_fails(
+        self, preflight, create_task
+    ):
+        response = self.client.post(
+            "/api/v1/asc-ai/production",
+            json={"video_subject": "Теплица"},
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("scheduler unavailable", response.json()["detail"])
+        create_task.assert_not_called()
+        preflight.assert_called_once()
 
     def test_director_plan_rejects_invalid_aspect_before_service_call(self):
         with patch.object(
