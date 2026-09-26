@@ -221,6 +221,22 @@ def _workflow_resolution(row: dict, aspect: Any = None) -> tuple[int, int]:
     )
 
 
+def _effective_audio_policy(params=None) -> tuple[str, str, str]:
+    voice_mode = str(config.ui.get("voice_mode", "tts") or "tts")
+    tts_server = str(config.ui.get("tts_server", "chatterbox") or "chatterbox")
+    custom_audio = str(
+        getattr(params, "custom_audio_file", "") if params is not None else ""
+    ).strip()
+    task_voice = str(
+        getattr(params, "voice_name", "") if params is not None else ""
+    ).strip()
+    # A headless/local task can explicitly carry a Chatterbox voice even when
+    # an old WebUI session persisted Azure/another provider globally.
+    if voice_mode == "tts" and task_voice.startswith("chatterbox:"):
+        tts_server = "chatterbox"
+    return voice_mode, tts_server, custom_audio
+
+
 def _component_health(name: str, url: str) -> dict:
     result = _request_json("GET", url, timeout=(3, 10))
     status = str(result.get("status") or "").lower()
@@ -241,8 +257,7 @@ def health(params=None, *, stop_at: str = "video") -> dict:
         if params is not None
         else "asc_ai"
     )
-    voice_mode = str(config.ui.get("voice_mode", "tts") or "tts")
-    tts_server = str(config.ui.get("tts_server", "chatterbox") or "chatterbox")
+    voice_mode, tts_server, custom_audio = _effective_audio_policy(params)
 
     checks: list[tuple[str, str]] = []
     if director_enabled:
@@ -266,9 +281,6 @@ def health(params=None, *, stop_at: str = "video") -> dict:
                     ("visual_analyzer", _visual_url() + "/health"),
                 ]
             )
-    custom_audio = str(
-        getattr(params, "custom_audio_file", "") if params is not None else ""
-    ).strip()
     needs_audio = stop_at not in {"script", "terms"}
     if (
         needs_audio
@@ -306,9 +318,7 @@ def validate_local_only(params) -> None:
         params, "director_enabled", False
     ):
         raise AscAIError("ASC-AI visual source requires Director planning")
-    voice_mode = str(config.ui.get("voice_mode", "tts") or "tts")
-    tts_server = str(config.ui.get("tts_server", "chatterbox") or "chatterbox")
-    custom_audio = str(getattr(params, "custom_audio_file", "") or "").strip()
+    voice_mode, tts_server, custom_audio = _effective_audio_policy(params)
     if (
         not custom_audio
         and voice_mode == "tts"
