@@ -7,12 +7,12 @@ MoneyPrinterTurbo используется как production/editor слой, а
 1. Пользователь вводит тему или готовый сценарий.
 2. **Director** создаёт сценарий и scene plan локальным `Qwen3-8B-Q4_K_M`.
 3. Перед обращением к `prompt-llm-local` Director создаёт job/stage и получает **GPU Scheduler lease** (`:8090`). Прямой неучтённый GPU-доступ не используется.
-4. Director ограничивает число дорогих `LOCAL_VIDEO` сцен; остальные сцены идут через `LOCAL_IMAGE`.
+4. Director опционально получает bounded MediaWiki research и canonical visual identity из Character Hub (`:8096`), затем ограничивает число дорогих `LOCAL_VIDEO` сцен; остальные сцены идут через `LOCAL_IMAGE`.
 5. Изображения генерируются только через **Image Adapter** (`:8091`), который сам работает с Scheduler и ComfyUI.
 6. Для динамических сцен Image Adapter запускает локальный Wan I2V. MoneyPrinterTurbo не обращается к ComfyUI напрямую.
-7. Каждый полученный материал регистрируется в **Prompt Intelligence artifact registry** (`:8094`) и проходит локальный **Visual Analyzer** (`:8095`) через канонический `/api/v1/evidence/analyze`.
-8. QC использует sealed `technical_assessment`. Visual Analyzer намеренно не выдаёт выдуманный prompt-similarity score.
-9. Не прошедшее технический QC изображение может быть один раз локально перегенерировано; неудачный I2V может откатиться на исходное изображение.
+7. Каждый полученный материал регистрируется в **Prompt Intelligence artifact registry** (`:8094`). Adaptive still-QC вызывает **Visual Analyzer** (`:8095`) только для контрольных/character/retry кадров; Wan-видео анализируется всегда.
+8. QC использует sealed `technical_assessment`. Visual Analyzer намеренно не выдаёт выдуманный prompt-similarity score; для пропущенных still VLM-pass manifest явно фиксирует `visual_analysis_skipped=true`.
+9. Не прошедшее технический QC изображение получает новый idempotency key и реально перегенерируется. Перед Wan enqueue проверяется совместимость aspect ratio; несовместимая вертикальная сцена сразу уходит в still fallback без расхода GPU.
 10. MoneyPrinterTurbo собирает ролик MoviePy/FFmpeg, делает локальную озвучку и локальные Whisper-субтитры.
 
 ## Local-only policy
@@ -39,8 +39,9 @@ MoneyPrinterTurbo используется как production/editor слой, а
 - Image Adapter: `http://127.0.0.1:8091`
 - Prompt Intelligence: `http://127.0.0.1:8094`
 - Visual Analyzer: `http://127.0.0.1:8095`
+- Character Hub: `http://127.0.0.1:8096`
 
-В Docker overlay используются внутренние имена: `gpu-scheduler:8090`, `prompt-llm-local:8080`, `image-adapter:8091`, `prompt-intelligence:8094`, `visual-analyzer:8095`, `chatterbox-tts:4123`.
+В Docker overlay используются внутренние имена ASC-AI: `gpu-scheduler:8090`, `prompt-llm-local:8080`, `image-adapter:8091`, `prompt-intelligence:8094`, `visual-analyzer:8095`, `character-chat:8096`. Chatterbox намеренно остаётся host-local CPU endpoint: `http://host.docker.internal:4123/v1`.
 
 ## Запуск на ASC-AI
 
@@ -64,6 +65,7 @@ API: `http://127.0.0.1:8080/docs`
     curl http://127.0.0.1:8091/health
     curl http://127.0.0.1:8094/health
     curl http://127.0.0.1:8095/health
+    curl http://127.0.0.1:8096/health
 
 Director дополнительно использует Scheduler API `/api/v1/jobs`, `/api/v1/stages/*` и `/api/v1/leases/*`.
 
@@ -79,13 +81,26 @@ Director дополнительно использует Scheduler API `/api/v1/
 
 Preflight MoneyPrinterTurbo проверяет Chatterbox вместе с Scheduler, Prompt LLM, Image Adapter, Prompt Intelligence и Visual Analyzer.
 
+## Headless control plane
+
+MoneyPrinterTurbo публикует отдельный authenticated namespace для ASC-AI Agent:
+
+    GET  /api/v1/asc-ai/capabilities
+    GET  /api/v1/asc-ai/health
+    GET  /api/v1/asc-ai/characters
+    GET  /api/v1/asc-ai/characters/{character_id}
+    POST /api/v1/asc-ai/director/plan
+
+Director preview является planning-only: Scheduler/Qwen/Character Hub/research разрешены, но Image Adapter/Wan не запускаются.
+
 ## Экономия GPU
 
 - сценарий + scene plan: один локальный Qwen3-8B inference;
 - большинство сцен: Krea/Lustify image;
 - image → лёгкий zoom/pan в MoneyPrinterTurbo;
 - только выбранные Director сцены: Wan I2V;
-- Qwen3-VL используется только для bounded QC;
+- Qwen3-VL используется adaptive: первый/каждый N-й still, Character Hub сцены, retries и все Wan-видео;
+- MediaWiki research — один bounded HTTP-запрос без AI API; source URLs остаются в provenance и не тратят Qwen context;
 - локальные LLM/VLM освобождают VRAM после inference согласно ASC-AI scheduler policy.
 
 Такой режим значительно дешевле по вычислениям, чем генерация всего ролика через I2V, но оставляет Director возможность выделять действительно важные динамические сцены.
