@@ -12,13 +12,15 @@
 
 - **Полный русский WebUI:** русская локаль является primary edition и должна полностью покрывать английские UI-ключи.
 - **ASC-AI — источник по умолчанию:** `video_source = "asc_ai"`.
-- **Director по умолчанию:** локальный Qwen3-8B создаёт сценарий и production-ready scene plan.
+- **Director по умолчанию:** локальный Qwen3-8B создаёт сценарий и production-ready scene plan; по желанию получает до двух коротких публичных MediaWiki-выдержек без платного AI API.
 - **Никакого прямого ComfyUI:** изображения и I2V идут только через ASC-AI Image Adapter.
 - **GPU Scheduler обязателен:** Director получает lease перед локальным LLM inference; Krea/Lustify, Wan и Qwen3-VL используют существующий ASC-AI control plane.
 - **Строгий local-only:** облачные LLM/TTS/image/video/music providers и автоматическая сторонняя публикация блокируются в production-пути.
-- **Локальный QC:** Prompt Intelligence регистрирует артефакты, Visual Analyzer/Qwen3-VL анализирует фактический результат без выдуманного semantic score.
-- **Экономия GPU:** большая часть сцен может быть статичной генерацией + лёгким zoom/pan; число Wan I2V сцен задаётся Director budget.
-- **Production manifest:** для каждой задачи сохраняется `production-manifest.json` с попытками генерации, QC, fallback и фактическими выходами.
+- **Локальный QC:** Prompt Intelligence регистрирует каждый артефакт; adaptive policy не грузит Qwen3-VL для каждого still, но всегда анализирует Wan-видео, Character Hub сцены, retries и контрольные кадры.
+- **Экономия GPU:** большая часть сцен может быть статичной генерацией + лёгким zoom/pan; число Wan I2V сцен задаётся Director budget, а несовместимый aspect ratio отсекается до GPU enqueue.
+- **Character Hub continuity:** Director может закрепить одного canonical персонажа между сценами через reference artifacts/LoRA из ASC-AI Character Hub.
+- **Production manifest:** для каждой задачи сохраняется `production-manifest.json` с Scheduler job/stage/lease, seed/settings, artifact IDs, QC, fallback и фактическими выходами.
+- **Headless API:** ASC-AI агент может использовать `/api/v1/asc-ai/capabilities`, `/health`, `/characters` и `/director/plan` без WebUI.
 - **Устойчивое ASC-AI-развёртывание:** production overlay включает Redis с AOF для очереди/состояний задач.
 - Китайский README upstream сохранён как `README-upstream-zh.md` для удобной синхронизации.
 
@@ -31,6 +33,7 @@
 - Image Adapter — `:8091`;
 - Prompt Intelligence — `:8094`;
 - Visual Analyzer — `:8095`;
+- Character Hub / Character Chat — `:8096` (нужен только при выборе постоянного персонажа);
 - локальный OpenAI-compatible Chatterbox TTS — host `:4123`;
 - FFmpeg;
 - faster-whisper;
@@ -75,7 +78,9 @@ http://127.0.0.1:8080/docs
 - максимальное число дорогих Wan I2V сцен;
 - общий визуальный стиль;
 - целевая аудитория;
-- цель ролика.
+- цель ролика;
+- необязательный public research;
+- необязательный canonical персонаж из Character Hub.
 
 Director возвращает структурированный план:
 
@@ -92,6 +97,20 @@ script
 ```
 
 Если пользователь уже передал готовый сценарий, Director не переписывает его, а только строит визуальный production plan.
+
+## Headless API для ASC-AI Agent
+
+Все endpoints используют ту же `app.api_key`-защиту, что и остальной API:
+
+```text
+GET  /api/v1/asc-ai/capabilities
+GET  /api/v1/asc-ai/health
+GET  /api/v1/asc-ai/characters
+GET  /api/v1/asc-ai/characters/{character_id}
+POST /api/v1/asc-ai/director/plan
+```
+
+`POST /director/plan` выполняет только research/Character Hub preflight + scheduler-managed Qwen planning и **не запускает Image Adapter/Wan render**. Полный render остаётся в штатной task API MoneyPrinterTurbo.
 
 ## Local-only policy
 
