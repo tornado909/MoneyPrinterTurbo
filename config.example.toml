@@ -650,10 +650,10 @@ director_priority = 150
 director_temperature = 0.45
 director_max_tokens = 3500
 director_style = "cinematic documentary realism, clean composition"
-# Run an extra governed Prompt Intelligence plan only for LOCAL_VIDEO scenes.
-# This lets PI select validated local resources without paying the Qwen cost for
-# every ordinary still scene.
-pi_enrich_video_scenes = true
+# Optional extra Prompt Intelligence planning for LOCAL_VIDEO scenes.
+# Forced OFF while local_only=true because current ASC-AI PI is local-first and
+# can fall back to an external provider when local planning fails.
+pi_enrich_video_scenes = false
 pi_resource_mode = "AUTO"
 pi_planning_timeout_seconds = 180
 image_workflow_id = "lustify_krea_v10_native_int8.v1"
