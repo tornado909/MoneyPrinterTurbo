@@ -856,39 +856,6 @@ def generate_video_from_image(
     return output_path
 
 
-def stage_for_qc(
-    task_id: str,
-    scene_id: str,
-    media_path: str,
-) -> str:
-    input_root = Path(str(_setting("input_root", "/srv/ai-data/input"))).resolve()
-    source = Path(media_path).resolve()
-    if not source.is_file():
-        raise AscAIError("production QC source is missing")
-    suffix = source.suffix.lower()
-    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".mov", ".mkv"}:
-        raise AscAIError("production QC source has an unsupported extension")
-    relative = (
-        Path("moneyprinterturbo")
-        / _safe_token(task_id)
-        / "qc"
-        / (_safe_token(scene_id) + suffix)
-    )
-    target = (input_root / relative).resolve()
-    try:
-        target.relative_to(input_root)
-    except ValueError as exc:
-        raise AscAIError("unsafe production QC input path") from exc
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        target.unlink()
-    try:
-        os.link(source, target)
-    except OSError:
-        shutil.copy2(source, target)
-    return relative.as_posix()
-
-
 def _image_vlm_required(
     scene_index: int,
     attempt: int,
