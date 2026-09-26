@@ -51,6 +51,8 @@ MoneyPrinterTurbo используется как production/editor слой, а
 
 Контейнеры MoneyPrinterTurbo присоединяются к external network `asc-ai-stack_default` и монтируют `/srv/ai-data` для обмена артефактами. Сам MoneyPrinterTurbo GPU не получает.
 
+ASC-AI overlay также поднимает отдельный `redis:7-alpine` только во внутренней сети MoneyPrinterTurbo. Он хранит очередь и состояние задач с AOF; наружу порт Redis не публикуется.
+
 WebUI: `http://127.0.0.1:8501`
 
 API: `http://127.0.0.1:8080/docs`
@@ -64,6 +66,18 @@ API: `http://127.0.0.1:8080/docs`
     curl http://127.0.0.1:8095/health
 
 Director дополнительно использует Scheduler API `/api/v1/jobs`, `/api/v1/stages/*` и `/api/v1/leases/*`.
+
+## Локальная озвучка
+
+Строгий local-only режим использует self-hosted Chatterbox через OpenAI-compatible `/v1/audio/speech`. ASC-AI overlay не предполагает несуществующий контейнер внутри основного стека: по умолчанию он обращается к локальному host endpoint `http://host.docker.internal:4123/v1`.
+
+Поднимите официальный `travisvn/chatterbox-tts-api` в CPU-only режиме на хосте и убедитесь, что:
+
+    curl http://127.0.0.1:4123/health
+
+возвращает успешный ответ. CPU-режим выбран намеренно: озвучка не должна занимать VRAM и конкурировать с Director, Krea/Lustify, Wan или Qwen3-VL. Если сервис опубликован по другому адресу, задайте `MPT_CHATTERBOX_BASE_URL` перед запуском compose.
+
+Preflight MoneyPrinterTurbo проверяет Chatterbox вместе с Scheduler, Prompt LLM, Image Adapter, Prompt Intelligence и Visual Analyzer.
 
 ## Экономия GPU
 
