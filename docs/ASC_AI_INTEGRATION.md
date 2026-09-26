@@ -90,8 +90,15 @@ MoneyPrinterTurbo публикует отдельный authenticated namespace 
     GET  /api/v1/asc-ai/characters
     GET  /api/v1/asc-ai/characters/{character_id}
     POST /api/v1/asc-ai/director/plan
+    POST /api/v1/asc-ai/production
 
 Director preview является planning-only: Scheduler/Qwen/Character Hub/research разрешены, но Image Adapter/Wan не запускаются.
+
+Production endpoint делает полный local-only preflight и ставит задачу в штатный MoneyPrinterTurbo TaskManager. Возвращаемый `task_id` совместим с обычным:
+
+    GET /api/v1/tasks/{task_id}
+
+Никакой второй очереди или отдельного renderer lifecycle для ASC-AI API не создаётся.
 
 ## Экономия GPU
 
@@ -100,7 +107,7 @@ Director preview является planning-only: Scheduler/Qwen/Character Hub/re
 - image → лёгкий zoom/pan в MoneyPrinterTurbo;
 - только выбранные Director сцены: Wan I2V;
 - Qwen3-VL используется adaptive: первый/каждый N-й still, Character Hub сцены, retries и все Wan-видео;
-- MediaWiki research — один bounded HTTP-запрос без AI API; source URLs остаются в provenance и не тратят Qwen context;
+- MediaWiki research — bounded public HTTP без AI API; результаты кэшируются на retry и при нехватке данных могут добираться из fallback-языка, source URLs остаются в provenance;
 - локальные LLM/VLM освобождают VRAM после inference согласно ASC-AI scheduler policy.
 
 Такой режим значительно дешевле по вычислениям, чем генерация всего ролика через I2V, но оставляет Director возможность выделять действительно важные динамические сцены.
