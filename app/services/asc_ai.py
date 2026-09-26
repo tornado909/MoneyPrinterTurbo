@@ -17,7 +17,7 @@ import requests
 from loguru import logger
 
 from app.config import config
-from app.services import video
+from app.services import asc_ai_director, asc_ai_qc, video
 from app.utils import utils
 
 
@@ -162,10 +162,14 @@ def _workflow_resolution(row: dict) -> tuple[int, int]:
 
 def health() -> dict:
     return {
-        "director": _request_json(
-            "GET",
-            _prompt_url() + "/api/v1/prompt-intelligence/director/capabilities",
-            timeout=(3, 10),
+        "scheduler": _request_json(
+            "GET", _scheduler_url() + "/health", timeout=(3, 10)
+        ),
+        "prompt_intelligence": _request_json(
+            "GET", _prompt_url() + "/health", timeout=(3, 10)
+        ),
+        "prompt_llm": _request_json(
+            "GET", _prompt_llm_url() + "/health", timeout=(3, 10)
         ),
         "image_adapter": _request_json(
             "GET", _image_url() + "/health", timeout=(3, 10)
@@ -193,6 +197,14 @@ def validate_local_only(params) -> None:
         raise AscAIError(
             "local-only mode requires self-hosted Chatterbox TTS or uploaded/no voice"
         )
+    if (
+        not getattr(params, "director_enabled", False)
+        and not str(getattr(params, "video_script", "") or "").strip()
+    ):
+        raise AscAIError(
+            "local-only mode requires Director or a user-provided script; "
+            "cloud LLM script generation is disabled"
+        )
     subtitle_provider = str(
         config.app.get("subtitle_provider", "whisper") or "whisper"
     )
@@ -207,48 +219,15 @@ def validate_local_only(params) -> None:
 def create_director_plan(params) -> dict:
     if not enabled():
         raise AscAIError("ASC-AI integration is disabled")
-    aspect = getattr(params.video_aspect, "value", params.video_aspect) or "9:16"
-    target_duration = int(
-        _setting(
-            "director_target_duration_seconds",
-            getattr(params, "director_target_duration_seconds", 45),
+    try:
+        return asc_ai_director.create_plan(
+            params,
+            dict(config.asc_ai),
+            scheduler_url=_scheduler_url(),
+            prompt_llm_url=_prompt_llm_url(),
         )
-    )
-    max_video_scenes = int(
-        _setting(
-            "director_max_local_video_scenes",
-            getattr(params, "director_max_local_video_scenes", 1),
-        )
-    )
-    payload = {
-        "topic": params.video_subject,
-        "script": params.video_script or "",
-        "language": (params.video_language or "ru-RU").split("-", 1)[0],
-        "target_duration_seconds": target_duration,
-        "aspect_ratio": str(aspect),
-        "scene_duration_seconds": int(
-            _setting("director_scene_duration_seconds", 7)
-        ),
-        "max_local_video_scenes": max_video_scenes,
-        "style": getattr(params, "director_style", "")
-        or str(_setting("director_style", "")),
-        "audience": getattr(params, "director_audience", ""),
-        "purpose": getattr(params, "director_purpose", ""),
-    }
-    plan = _request_json(
-        "POST",
-        _prompt_url() + "/api/v1/prompt-intelligence/director/plan",
-        json=payload,
-        timeout=(5, float(_setting("director_timeout_seconds", 420))),
-    )
-    if not plan.get("local_only") or plan.get("gpu_policy") != "scheduler_managed":
-        raise AscAIError(
-            "Director did not return the required local-only scheduler policy"
-        )
-    scenes = plan.get("scenes")
-    if not isinstance(scenes, list) or not scenes:
-        raise AscAIError("Director returned no scenes")
-    return plan
+    except asc_ai_director.DirectorError as exc:
+        raise AscAIError(str(exc)) from exc
 
 
 def persist_director_plan(task_id: str, plan: dict) -> str:
@@ -466,56 +445,27 @@ def quality_control(
     if not bool(_setting("qc_enabled", True)):
         return {
             "passed": True,
-            "semantic_score": 1.0,
+            "technical_status": "skipped",
+            "semantic_score": None,
             "technical_score": 1.0,
             "issues": [],
             "retry_prompt": "",
             "skipped": True,
         }
-    scene_id = str(scene.get("scene_id") or "scene")
-    input_name = stage_for_qc(
-        task_id,
-        f"{scene_id}-{media_kind}",
-        media_path,
-    )
-    expected = str(scene.get("visual_prompt") or "").strip()
-    if media_kind == "video":
-        motion = str(scene.get("motion_prompt") or "").strip()
-        if motion:
-            expected = f"{expected}. Expected motion: {motion}"
-    payload = {
-        "input_name": input_name,
-        "expected_prompt": expected,
-        "profile": str(_setting("qc_profile", "FAST")),
-    }
-    result = _request_json(
-        "POST",
-        _visual_url() + "/api/v1/production/qc",
-        json=payload,
-        timeout=(5, float(_setting("qc_timeout_seconds", 300))),
-    )
-    if result.get("external_egress") is not False:
-        raise AscAIError("production QC violated the local-only egress contract")
-    observation = result.get("production_qc")
-    if not isinstance(observation, dict):
-        raise AscAIError("production QC returned no typed observation")
-    semantic = float(observation.get("semantic_score", 0))
-    technical = float(observation.get("technical_score", 0))
-    catastrophic = bool(observation.get("catastrophic_artifacts", False))
-    passed = (
-        not catastrophic
-        and semantic >= float(_setting("qc_min_semantic_score", 0.65))
-        and technical >= float(_setting("qc_min_technical_score", 0.75))
-    )
-    return {
-        **observation,
-        "passed": passed,
-        "semantic_score": semantic,
-        "technical_score": technical,
-        "provider": result.get("provider"),
-        "provider_model": result.get("provider_model"),
-        "skipped": False,
-    }
+    try:
+        return asc_ai_qc.quality_control(
+            prompt_url=_prompt_url(),
+            visual_url=_visual_url(),
+            task_id=task_id,
+            scene=scene,
+            media_path=media_path,
+            media_kind=media_kind,
+            profile=str(_setting("qc_profile", "FAST")),
+            upload_timeout=float(_setting("qc_upload_timeout_seconds", 120)),
+            timeout=float(_setting("qc_timeout_seconds", 300)),
+        )
+    except asc_ai_qc.QCError as exc:
+        raise AscAIError(str(exc)) from exc
 
 
 def generate_scene_materials(
