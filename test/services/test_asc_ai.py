@@ -221,7 +221,10 @@ class TestAscAIIntegration(unittest.TestCase):
         )
         self.assertIn("platinum short hair", payload["prompt"])
         self.assertIn("long red hair", payload["negative_prompt"])
-        self.assertEqual(payload["prompt_compiler_id"], "CHARACTER_HUB")
+        self.assertEqual(payload["prompt_compiler_id"], "RAW")
+        self.assertEqual(
+            payload["prompt_compiler_version"], "mpt-director-character-v2"
+        )
 
     @patch("app.services.asc_ai._request_json")
     def test_local_only_never_calls_prompt_intelligence_planning(self, request_json):
