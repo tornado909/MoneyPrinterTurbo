@@ -21,7 +21,7 @@ class AscAIError(RuntimeError):
 
 _LOCAL_VIDEO_SOURCES = {"asc_ai", "local"}
 _LOCAL_TTS_SERVERS = {"chatterbox"}
-_LOCAL_BGM_TYPES = {"", "none", "random", "local", "custom"}
+_LOCAL_BGM_TYPES = {"", "none", "random", "preset", "local", "custom"}
 
 
 def _setting(name: str, default: Any = None) -> Any:
