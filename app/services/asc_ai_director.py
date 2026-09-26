@@ -7,15 +7,37 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager, suppress
-from typing import Any
+from typing import Any, Literal
 
 import requests
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.services import local_research
 
 
 class DirectorError(RuntimeError):
     pass
+
+
+class DirectorSceneCandidate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    scene_id: str = Field(default="", max_length=100)
+    narration: str = Field(default="", max_length=6000)
+    duration_seconds: int = Field(default=7, ge=2, le=15)
+    visual_strategy: Literal["LOCAL_IMAGE", "LOCAL_VIDEO"] = "LOCAL_IMAGE"
+    visual_prompt: str = Field(min_length=1, max_length=6000)
+    motion_prompt: str = Field(default="", max_length=3000)
+    transition: str = Field(default="cut", max_length=100)
+    overlay_text: str = Field(default="", max_length=1000)
+
+
+class DirectorPlanCandidate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    script: str = Field(min_length=1, max_length=20000)
+    scenes: list[DirectorSceneCandidate] = Field(min_length=1, max_length=24)
+    production_notes: list[str] = Field(default_factory=list, max_length=30)
 
 
 def _json_request(method: str, url: str, **kwargs) -> Any:
@@ -269,50 +291,58 @@ def _extract_object(text: str) -> dict:
 
 def _normalize(raw: dict, params) -> dict:
     supplied_script = str(params.video_script or "").strip()
-    script = supplied_script or str(raw.get("script") or "").strip()
-    if not script:
-        raise DirectorError("Director returned an empty script")
-    rows = raw.get("scenes")
-    if not isinstance(rows, list) or not rows:
-        raise DirectorError("Director returned no scenes")
-    max_video = max(0, int(getattr(params, "director_max_local_video_scenes", 1)))
+    if supplied_script:
+        raw = dict(raw)
+        raw["script"] = supplied_script
+    try:
+        candidate = DirectorPlanCandidate.model_validate(raw)
+    except ValidationError as exc:
+        raise DirectorError(
+            "Director plan schema validation failed: "
+            + "; ".join(
+                ".".join(str(part) for part in row.get("loc", ()))
+                + ": "
+                + str(row.get("msg") or "invalid value")
+                for row in exc.errors()[:8]
+            )
+        ) from exc
+
+    max_video = max(
+        0, int(getattr(params, "director_max_local_video_scenes", 1))
+    )
     used_video = 0
     scenes = []
-    for index, row in enumerate(rows, start=1):
-        if not isinstance(row, dict):
-            continue
-        visual = str(row.get("visual_prompt") or "").strip()
-        if not visual:
-            continue
-        strategy = str(row.get("visual_strategy") or "LOCAL_IMAGE").upper()
+    for index, row in enumerate(candidate.scenes, start=1):
+        strategy = row.visual_strategy
         if strategy == "LOCAL_VIDEO" and used_video < max_video:
             used_video += 1
         else:
             strategy = "LOCAL_IMAGE"
         scenes.append(
             {
-                "scene_id": str(row.get("scene_id") or f"scene_{index:02d}"),
-                "narration": str(row.get("narration") or "").strip(),
-                "duration_seconds": max(
-                    2, min(15, int(row.get("duration_seconds") or 7))
-                ),
+                "scene_id": row.scene_id or f"scene_{index:02d}",
+                "narration": row.narration,
+                "duration_seconds": row.duration_seconds,
                 "visual_strategy": strategy,
-                "visual_prompt": visual,
-                "motion_prompt": str(row.get("motion_prompt") or "").strip(),
-                "transition": str(row.get("transition") or "cut").strip(),
-                "overlay_text": str(row.get("overlay_text") or "").strip(),
+                "visual_prompt": row.visual_prompt.strip(),
+                "motion_prompt": row.motion_prompt.strip(),
+                "transition": row.transition.strip() or "cut",
+                "overlay_text": row.overlay_text.strip(),
             }
         )
-    if not scenes:
-        raise DirectorError("Director returned no usable scenes")
+
     return {
-        "schema_version": "mpt.director.v2",
+        "schema_version": "mpt.director.v3",
         "local_only": True,
         "gpu_policy": "scheduler_managed",
         "director_provider": "asc-ai-local-qwen3",
-        "script": script,
+        "script": candidate.script.strip(),
         "scenes": scenes,
-        "production_notes": raw.get("production_notes") or [],
+        "production_notes": [
+            str(note).strip()[:1000]
+            for note in candidate.production_notes
+            if str(note).strip()
+        ][:30],
         "research": raw.get("research") or [],
     }
 
@@ -459,19 +489,29 @@ Never request generated text, logos or watermarks inside imagery.
         admission_timeout=float(settings.get("director_admission_timeout_seconds", 300)),
     )
     last_error: Exception | None = None
-    for _ in range(2):
+    current_prompt = prompt
+    previous_output = ""
+    for attempt in range(2):
         try:
             text = runtime.chat(
-                prompt,
+                current_prompt,
                 timeout=float(settings.get("director_timeout_seconds", 420)),
                 temperature=float(settings.get("director_temperature", 0.45)),
                 max_tokens=int(settings.get("director_max_tokens", 3500)),
             )
+            previous_output = text
             raw = _extract_object(text)
             raw["research"] = research_items
-            if supplied_script:
-                raw["script"] = supplied_script
             return _normalize(raw, params)
         except (DirectorError, ValueError, TypeError) as exc:
             last_error = exc
+            if attempt == 0:
+                current_prompt = (
+                    prompt
+                    + "\n\nThe previous JSON response was invalid. Repair it and return "
+                    "one complete JSON object only. Validation error: "
+                    + str(exc)[:1200]
+                    + "\nPrevious response:\n"
+                    + previous_output[:6000]
+                )
     raise DirectorError(f"Director planning failed: {last_error}")
