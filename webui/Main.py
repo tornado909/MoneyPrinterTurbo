@@ -67,16 +67,16 @@ from app.utils.logging_utils import configure_terminal_logger
 from app.utils import utils
 
 st.set_page_config(
-    page_title="MoneyPrinterTurbo",
+    page_title="MoneyPrinterTurbo RU",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="auto",
     menu_items={
-        "Report a bug": "https://github.com/harry0703/MoneyPrinterTurbo/issues",
-        "About": "# MoneyPrinterTurbo\nSimply provide a topic or keyword for a video, and it will "
-        "automatically generate the video copy, video materials, video subtitles, "
-        "and video background music before synthesizing a high-definition short "
-        "video.\n\nhttps://github.com/harry0703/MoneyPrinterTurbo",
+        "Report a bug": "https://github.com/tornado909/MoneyPrinterTurbo/issues",
+        "About": "# MoneyPrinterTurbo RU\nРусскоязычная редакция MoneyPrinterTurbo: "
+        "сценарий, материалы, озвучка, субтитры, музыка и сборка короткого видео. "
+        "Основано на harry0703/MoneyPrinterTurbo.\n\n"
+        "https://github.com/tornado909/MoneyPrinterTurbo",
     },
 )
 
@@ -628,6 +628,7 @@ def _initialize_session_state():
         saved_language=saved_ui_language,
         browser_locale=browser_locale,
         supported_languages=locales.keys(),
+        default_language="ru",
     )
 
     defaults = {
@@ -1669,13 +1670,13 @@ def _render_brand(available_update: str | None = None):
     st.markdown(
         f"""
         <h1 class="mpt-brand">
-            <span class="mpt-brand__name">MoneyPrinterTurbo</span>
+            <span class="mpt-brand__name">MoneyPrinterTurbo RU</span>
             <a class="mpt-brand__version"
-               href="https://github.com/harry0703/MoneyPrinterTurbo"
+               href="https://github.com/tornado909/MoneyPrinterTurbo"
                target="_blank"
                rel="noopener noreferrer"
-               aria-label="Open MoneyPrinterTurbo on GitHub"
-               title="Open project on GitHub">v{html.escape(str(config.project_version))}</a>
+               aria-label="Open MoneyPrinterTurbo RU on GitHub"
+               title="Open RU edition on GitHub">v{html.escape(str(config.project_version))}</a>
             {update_link}
         </h1>
         """,

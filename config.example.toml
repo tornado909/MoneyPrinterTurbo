@@ -639,7 +639,8 @@ open_task_folder_on_completion = true
 
 # The WebUI writes the remaining preferences automatically. Uncomment values
 # below only when you want to define initial defaults manually.
-# language = "zh"
+# Russian Edition starts in Russian; the WebUI can change and persist it later.
+language = "ru"
 # video_language = ""
 # paragraph_number = 1
 # video_script_prompt = ""

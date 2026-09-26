@@ -13,7 +13,8 @@ WEBUI_MAIN = ROOT_DIR / "webui" / "Main.py"
 I18N_DIR = ROOT_DIR / "webui" / "i18n"
 LLM_PROVIDER_TIPS_PREFIX = "llm_provider_tips."
 TTS_PROVIDER_TIPS_PREFIX = "tts_provider_tips."
-SECONDARY_LOCALES = ("az", "ca", "de", "es", "fr", "id", "it", "ko", "pt", "ru", "tr", "vi")
+SECONDARY_LOCALES = ("az", "ca", "de", "es", "fr", "id", "it", "ko", "pt", "tr", "vi")
+PRIMARY_LOCALIZED_LOCALES = ("ru",)
 PROVIDER_TIPS_PREFIXES = (
     LLM_PROVIDER_TIPS_PREFIX,
     TTS_PROVIDER_TIPS_PREFIX,
@@ -284,6 +285,29 @@ class TestWebuiI18n(unittest.TestCase):
             with self.subTest(locale=locale):
                 label = _load_translation(locale)["Metaso MiniMax API Key"]
                 self.assertEqual(_markdown_urls(label), {expected_url})
+
+    def test_primary_localized_locales_fully_cover_english_locale(self):
+        """Primary editions must never silently fall back to English UI strings."""
+        en_translations = _load_translation("en")
+        for locale in PRIMARY_LOCALIZED_LOCALES:
+            with self.subTest(locale=locale):
+                localized = _load_translation(locale)
+                self.assertEqual(sorted(set(en_translations) - set(localized)), [])
+                for key, en_value in en_translations.items():
+                    with self.subTest(locale=locale, key=key):
+                        self.assertEqual(
+                            _format_placeholders(localized[key]),
+                            _format_placeholders(en_value),
+                        )
+                        self.assertEqual(
+                            _markdown_urls(localized[key]),
+                            _markdown_urls(en_value),
+                        )
+
+    def test_russian_edition_webui_defaults_to_russian(self):
+        source = WEBUI_MAIN.read_text(encoding="utf-8")
+        self.assertIn('default_language="ru"', source)
+        self.assertIn('page_title="MoneyPrinterTurbo RU"', source)
 
     def test_secondary_locales_cover_english_locale(self):
         en_translations = _load_translation("en")
