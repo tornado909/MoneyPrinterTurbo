@@ -50,6 +50,7 @@ def wikipedia_research(
     if not re.fullmatch(r"[a-z]{2,3}", lang):
         lang = "ru"
     max_pages = max(1, min(5, int(max_pages)))
+    max_chars_per_page = max(200, min(4000, int(max_chars_per_page)))
     endpoint = f"https://{lang}.wikipedia.org/w/api.php"
     params = {
         "action": "query",
@@ -107,4 +108,6 @@ def wikipedia_research(
                 ),
             )
         )
+        if len(result) >= max_pages:
+            break
     return [item.as_dict() for item in result]
