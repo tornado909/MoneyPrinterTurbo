@@ -572,6 +572,17 @@
     "Confirm MuAPI Charge Help": "MuAPI clips are submitted one at a time and stop once they cover the voiceover duration. An ambiguous submission is not retried because it may already have created a billable remote task.",
     "Confirm MuAPI Charge Required": "Please confirm the MuAPI charge before generating the video.",
     "ASC-AI Director": "ASC-AI Director (Local)",
-    "ASC-AI Director Help": "Local pipeline: scheduler-backed Qwen Director → ASC-AI Image Adapter → local image/Wan I2V. No paid AI API is used."
+    "ASC-AI Director Help": "Local pipeline: scheduler-backed Qwen Director → ASC-AI Image Adapter → local image/Wan I2V. No paid AI API is used.",
+    "Director Settings": "Director",
+    "Director Target Duration": "Target duration, sec",
+    "Director Target Duration Help": "Director uses this as the narration and scene-budget target. Actual duration is aligned to the generated voiceover during rendering.",
+    "Director Local Video Scenes": "Wan I2V scenes",
+    "Director Local Video Scenes Help": "Maximum number of scenes allowed to use local Wan image-to-video. Set 0 for the cheapest image-only production mode.",
+    "Director Visual Style": "Global visual style",
+    "Director Audience": "Target audience",
+    "Director Purpose": "Video purpose",
+    "Check ASC-AI": "Check ASC-AI",
+    "ASC-AI Ready": "ASC-AI services are reachable",
+    "ASC-AI Unavailable": "ASC-AI preflight failed: {error}"
   }
 }
