@@ -67,6 +67,36 @@ def _bounded_strings(values: object, *, limit: int, max_chars: int) -> list[str]
     return result
 
 
+def _bounded_int(
+    value: object,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _bounded_float(
+    value: object,
+    *,
+    default: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        parsed = default
+    if parsed != parsed or parsed in {float("inf"), float("-inf")}:
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 def production_identity(
     manifest: dict[str, Any],
     *,
@@ -128,8 +158,18 @@ def production_identity(
             image.get("style_prompt_suffix") or ""
         ).strip()[:1000],
         "forbidden_prompt_terms": forbidden_prompt_terms,
-        "grounding_px": int(image.get("grounding_px") or 1024),
-        "ref_boost": float(image.get("ref_boost") or 1.0),
+        "grounding_px": _bounded_int(
+            image.get("grounding_px"),
+            default=1024,
+            minimum=512,
+            maximum=1536,
+        ),
+        "ref_boost": _bounded_float(
+            image.get("ref_boost"),
+            default=1.0,
+            minimum=0.25,
+            maximum=2.0,
+        ),
     }
     if not result["character_id"]:
         raise CharacterHubError("Character Hub manifest has no character identity")
