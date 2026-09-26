@@ -1796,6 +1796,16 @@ support_locales = [
 
 
 @st.cache_data(ttl=30, show_spinner=False)
+def _get_asc_ai_character_ids():
+    return asc_ai.list_characters()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_asc_ai_character_identity(character_id: str):
+    return asc_ai.get_character_identity(character_id)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
 def get_all_fonts():
     # 字体目录很少变化，但 Streamlit 每次控件交互都会 rerun 页面。短周期缓存
     # 可以避免连续重复 os.walk，同时保证新增字体后最多 30 秒即可被发现。
