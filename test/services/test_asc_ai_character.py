@@ -62,6 +62,20 @@ class TestAscAICharacterHub(unittest.TestCase):
         self.assertEqual(rows[:2], ["aria", "nika"])
         self.assertLessEqual(len(rows), 200)
 
+    def test_malformed_numeric_hints_are_safely_bounded(self):
+        identity = asc_ai_character.production_identity(
+            {
+                "character_id": "broken-hints",
+                "appearance": {"description": "recognizable adult character"},
+                "image_generation": {
+                    "grounding_px": "not-a-number",
+                    "ref_boost": "NaN",
+                },
+            }
+        )
+        self.assertEqual(identity["grounding_px"], 1024)
+        self.assertEqual(identity["ref_boost"], 1.0)
+
     def test_manifest_without_visual_identity_is_rejected(self):
         with self.assertRaises(asc_ai_character.CharacterHubError):
             asc_ai_character.production_identity(
