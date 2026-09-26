@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import json
+import math
+import mimetypes
 import os
 import re
 import shutil
+import threading
+import time
+import uuid
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +60,20 @@ def _visual_url() -> str:
     return (
         os.getenv("ASC_AI_VISUAL_ANALYZER_URL")
         or str(_setting("visual_analyzer_url", "http://127.0.0.1:8095"))
+    ).rstrip("/")
+
+
+def _scheduler_url() -> str:
+    return (
+        os.getenv("ASC_AI_SCHEDULER_URL")
+        or str(_setting("scheduler_url", "http://127.0.0.1:8090"))
+    ).rstrip("/")
+
+
+def _prompt_llm_url() -> str:
+    return (
+        os.getenv("ASC_AI_PROMPT_LLM_URL")
+        or str(_setting("prompt_llm_url", "http://127.0.0.1:8080"))
     ).rstrip("/")
 
 
