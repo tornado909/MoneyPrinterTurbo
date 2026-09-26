@@ -48,7 +48,8 @@ MoneyPrinterTurbo используется как production/editor слой, а
     git clone https://github.com/tornado909/MoneyPrinterTurbo.git
     cd MoneyPrinterTurbo
     cp config.example.toml config.toml
-    docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml up -d --build
+    docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml -f docker-compose.chatterbox.yml up -d --build
+    bash scripts/bootstrap-chatterbox-ru-voice.sh /path/to/russian-reference.wav
 
 Контейнеры MoneyPrinterTurbo присоединяются к external network `asc-ai-stack_default` и монтируют `/srv/ai-data` для обмена артефактами. Сам MoneyPrinterTurbo GPU не получает.
 
@@ -71,9 +72,11 @@ Director дополнительно использует Scheduler API `/api/v1/
 
 ## Локальная озвучка
 
-Строгий local-only режим использует self-hosted Chatterbox через OpenAI-compatible `/v1/audio/speech`. ASC-AI overlay не предполагает несуществующий контейнер внутри основного стека: по умолчанию он обращается к локальному host endpoint `http://host.docker.internal:4123/v1`.
+Строгий local-only режим использует self-hosted Chatterbox через OpenAI-compatible `/v1/audio/speech`. Рекомендуемый `docker-compose.chatterbox.yml` собирает CPU-only сервис из закреплённых SHA Chatterbox API и multilingual runtime, поэтому он не занимает GPU Scheduler.
 
-Поднимите официальный `travisvn/chatterbox-tts-api` в CPU-only режиме на хосте и убедитесь, что:
+Русский voice `ru-default` должен быть добавлен в `/v1/voices` с метаданными `language=ru`. MoneyPrinterTurbo проверяет это через voice catalog до production; неизвестный voice больше не может тихо откатиться на English default.
+
+Если Chatterbox уже запущен отдельно на хосте, базовый ASC-AI overlay по-прежнему умеет обращаться к `http://host.docker.internal:4123/v1`. Убедитесь, что:
 
     curl http://127.0.0.1:4123/health
 
