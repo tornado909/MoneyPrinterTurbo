@@ -211,18 +211,24 @@ class SchedulerManagedLocalLLM:
             if failure is None and not reclaimed:
                 raise DirectorError("Director local model VRAM reclaim was not verified")
 
-    def chat(self, prompt: str, *, timeout: float, temperature: float, max_tokens: int) -> str:
+    def chat(
+        self,
+        prompt: str,
+        *,
+        timeout: float,
+        temperature: float,
+        max_tokens: int,
+        system_prompt: str | None = None,
+    ) -> str:
+        effective_system_prompt = system_prompt or (
+            "You are the Director of a local short-video production pipeline. "
+            "Return JSON only. Do not use tools, URLs, external services, or "
+            "chain-of-thought. Make visuals concrete, filmable and consistent."
+        )
         payload = {
             "model": self.model_name,
             "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are the Director of a local short-video production pipeline. "
-                        "Return JSON only. Do not use tools, URLs, external services, or "
-                        "chain-of-thought. Make visuals concrete, filmable and consistent."
-                    ),
-                },
+                {"role": "system", "content": effective_system_prompt},
                 {"role": "user", "content": prompt},
             ],
             "temperature": temperature,
