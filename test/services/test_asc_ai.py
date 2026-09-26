@@ -304,6 +304,36 @@ class TestAscAIIntegration(unittest.TestCase):
         research.assert_not_called()
         self.assertEqual(result["research"], [])
 
+    def test_adaptive_image_qc_samples_first_stride_character_and_retry(self):
+        old_policy = config.asc_ai.get("qc_image_policy")
+        old_stride = config.asc_ai.get("qc_image_vlm_stride")
+        try:
+            config.asc_ai["qc_image_policy"] = "adaptive"
+            config.asc_ai["qc_image_vlm_stride"] = 3
+
+            plain = {"scene_id": "plain"}
+            character = {
+                "scene_id": "character",
+                "character_identity": {"character_id": "aria"},
+            }
+            self.assertTrue(asc_ai._image_vlm_required(0, 0, plain))
+            self.assertFalse(asc_ai._image_vlm_required(1, 0, plain))
+            self.assertTrue(asc_ai._image_vlm_required(3, 0, plain))
+            self.assertTrue(asc_ai._image_vlm_required(1, 0, character))
+            self.assertTrue(asc_ai._image_vlm_required(1, 1, plain))
+
+            config.asc_ai["qc_image_policy"] = "typo"
+            self.assertTrue(asc_ai._image_vlm_required(1, 0, plain))
+        finally:
+            if old_policy is None:
+                config.asc_ai.pop("qc_image_policy", None)
+            else:
+                config.asc_ai["qc_image_policy"] = old_policy
+            if old_stride is None:
+                config.asc_ai.pop("qc_image_vlm_stride", None)
+            else:
+                config.asc_ai["qc_image_vlm_stride"] = old_stride
+
     @patch("app.services.asc_ai_qc.quality_control")
     def test_quality_control_uses_canonical_qc_module(self, qc):
         qc.return_value = {
