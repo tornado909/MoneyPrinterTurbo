@@ -75,6 +75,36 @@ class TestAscAIIntegration(unittest.TestCase):
         with self.assertRaisesRegex(asc_ai.AscAIError, "user-provided script"):
             asc_ai.validate_local_only(params)
 
+    @patch("app.services.asc_ai._component_health", return_value={"status": "ok"})
+    def test_script_preflight_checks_only_local_director_dependencies(self, health):
+        asc_ai.preflight(self.params(), stop_at="script")
+        names = [call.args[0] for call in health.call_args_list]
+        self.assertEqual(names, ["scheduler", "prompt_llm"])
+
+    @patch("app.services.asc_ai._component_health", return_value={"status": "ok"})
+    def test_video_preflight_checks_full_local_pipeline(self, health):
+        params = self.params(custom_audio_file="")
+        asc_ai.preflight(params, stop_at="video")
+        names = [call.args[0] for call in health.call_args_list]
+        self.assertEqual(
+            names,
+            [
+                "scheduler",
+                "prompt_llm",
+                "image_adapter",
+                "prompt_intelligence",
+                "visual_analyzer",
+                "chatterbox_tts",
+            ],
+        )
+
+    @patch("app.services.asc_ai._component_health", return_value={"status": "ok"})
+    def test_custom_audio_preflight_does_not_require_tts(self, health):
+        params = self.params(custom_audio_file="voice.wav")
+        asc_ai.preflight(params, stop_at="video")
+        names = [call.args[0] for call in health.call_args_list]
+        self.assertNotIn("chatterbox_tts", names)
+
     def test_director_terms_keep_scene_order(self):
         plan = {
             "scenes": [
