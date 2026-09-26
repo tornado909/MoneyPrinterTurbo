@@ -634,6 +634,7 @@ enabled = true
 local_only = true
 prompt_intelligence_url = "http://127.0.0.1:8094"
 image_adapter_url = "http://127.0.0.1:8091"
+visual_analyzer_url = "http://127.0.0.1:8095"
 input_root = "/srv/ai-data/input"
 director_target_duration_seconds = 45
 director_scene_duration_seconds = 7
@@ -651,6 +652,13 @@ video_duration_seconds = 5
 video_frames = 89
 video_fallback_to_image = true
 generation_timeout_seconds = 1800
+qc_enabled = true
+qc_required = true
+qc_profile = "FAST"
+qc_min_semantic_score = 0.65
+qc_min_technical_score = 0.75
+qc_max_image_regenerations = 1
+qc_timeout_seconds = 300
 
 # =============================================================================
 # WebUI Preferences / WebUI 偏好
