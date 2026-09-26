@@ -460,6 +460,7 @@ class TestAscAIIntegration(unittest.TestCase):
                             "visual_strategy": "LOCAL_VIDEO",
                             "visual_prompt": "greenhouse",
                             "motion_prompt": "slow push in",
+                            "duration_seconds": 7,
                         }
                     ],
                 },
@@ -476,8 +477,15 @@ class TestAscAIIntegration(unittest.TestCase):
             self.assertEqual(manifest["status"], "complete")
             self.assertFalse(manifest["workflow_snapshot"]["video"]["available"])
             self.assertEqual(
-                manifest["scenes"][0]["fallback"], "video_generation_failed"
+                manifest["scenes"][0]["fallback"], "video_aspect_unsupported"
             )
+            self.assertEqual(
+                manifest["scenes"][0]["effective_duration_seconds"], 7
+            )
+            asc_ai.video.render_image_zoom_video.assert_called_once_with(
+                str(Path(temp_dir) / "image.png"), 7
+            )
+            asc_ai.generate_video_from_image.assert_not_called()
 
     @patch("app.services.asc_ai._output_path", return_value="/tmp/generated.png")
     @patch("app.services.asc_ai._request_json", return_value={"outputs": [{"path": "/tmp/generated.png"}]})
@@ -527,6 +535,29 @@ class TestAscAIIntegration(unittest.TestCase):
                 config.asc_ai.pop("input_root", None)
             else:
                 config.asc_ai["input_root"] = old_root
+
+    @patch("app.services.asc_ai._workflow_catalog")
+    def test_video_aspect_gate_skips_vertical_when_production_wan_is_landscape_only(
+        self, catalog
+    ):
+        catalog.return_value = [
+            {
+                "workflow_id": "wan_i2v_default.v1",
+                "purpose": "image_to_video",
+                "model_id": "mdl_diffusion_model_runtime",
+                "operator_only": False,
+                "validation_state": "production",
+                "default_resolution": "640x640",
+                "supported_resolutions": ["640x640", "832x480"],
+                "defaults": {"length": 81},
+            }
+        ]
+        vertical = asc_ai._video_compatibility("9:16")
+        landscape = asc_ai._video_compatibility("16:9")
+
+        self.assertFalse(vertical["compatible"])
+        self.assertTrue(landscape["compatible"])
+        self.assertEqual(landscape["resolution"], "832x480")
 
     @patch("app.services.asc_ai._workflow_catalog")
     def test_runtime_catalog_binding_uses_catalog_model(self, catalog):
