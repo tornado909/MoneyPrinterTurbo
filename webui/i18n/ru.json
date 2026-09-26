@@ -583,6 +583,8 @@
     "Director Purpose": "Цель ролика",
     "Check ASC-AI": "Проверить ASC-AI",
     "ASC-AI Ready": "Сервисы ASC-AI доступны",
-    "ASC-AI Unavailable": "Проверка ASC-AI не пройдена: {error}"
+    "ASC-AI Unavailable": "Проверка ASC-AI не пройдена: {error}",
+    "Director Public Research": "Публичный factual research",
+    "Director Public Research Help": "Отправляет только тему ролика в Wikipedia/MediaWiki и передаёт локальному Director не более двух коротких публичных выдержек. Платные AI API не используются. Отключайте для приватных или чисто творческих тем."
   }
 }
