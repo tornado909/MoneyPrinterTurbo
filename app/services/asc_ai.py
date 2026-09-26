@@ -603,6 +603,7 @@ def generate_scene_materials(
             "provider": plan.get("director_provider"),
             "gpu_policy": plan.get("gpu_policy"),
             "production_notes": plan.get("production_notes") or [],
+            "research": plan.get("research") or [],
         },
         "workflow_snapshot": {
             "image": _image_binding(),
