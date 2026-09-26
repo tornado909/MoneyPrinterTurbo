@@ -50,6 +50,20 @@ chmod +x webui.sh
 5. Для бесплатной Edge TTS / Azure TTS V1 в проекте доступны русские голоса, включая `ru-RU-SvetlanaNeural` и `ru-RU-DmitryNeural`.
 6. Настройте субтитры, музыку и монтаж и запустите генерацию.
 
+## ASC-AI Production Pipeline
+
+Русская редакция по умолчанию ориентирована на полностью локальное производство:
+
+- локальный **Qwen Director** внутри ASC-AI Prompt Intelligence;
+- все GPU-задачи проходят через **GPU Scheduler**;
+- изображения создаёт **ASC-AI Image Adapter**, а не прямой вызов ComfyUI;
+- динамические hero-сцены могут использовать локальный **Wan I2V**;
+- русская озвучка — self-hosted **Chatterbox Multilingual**;
+- субтитры — локальный **faster-whisper**;
+- платные AI API в `local_only` режиме блокируются до начала задачи.
+
+Подробная схема и запуск: [docs/ASC_AI_INTEGRATION.md](docs/ASC_AI_INTEGRATION.md).
+
 ## Проверка локализации
 
 ```bash
