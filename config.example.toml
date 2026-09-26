@@ -650,6 +650,12 @@ director_priority = 150
 director_temperature = 0.45
 director_max_tokens = 3500
 director_style = "cinematic documentary realism, clean composition"
+# Run an extra governed Prompt Intelligence plan only for LOCAL_VIDEO scenes.
+# This lets PI select validated local resources without paying the Qwen cost for
+# every ordinary still scene.
+pi_enrich_video_scenes = true
+pi_resource_mode = "AUTO"
+pi_planning_timeout_seconds = 180
 image_workflow_id = "lustify_krea_v10_native_int8.v1"
 image_model_id = "mdl_diffusion_model_0505412ed2ac"
 image_steps = 8
