@@ -571,6 +571,59 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertTrue(first.endswith("-attempt-1"))
         self.assertTrue(second.endswith("-attempt-2"))
 
+    def test_execution_provenance_is_replayable_but_omits_internal_model_path(self):
+        result = asc_ai._execution_provenance(
+            {
+                "state": "COMPLETED",
+                "job_id": "job-1",
+                "stage_id": "stage-1",
+                "lease_id": "lease-1",
+                "workflow": {
+                    "workflow_id": "krea_txt2img.v1",
+                    "version": 3,
+                    "graph_sha256": "graph-sha",
+                },
+                "model": {
+                    "model_id": "mdl_diffusion_model_123",
+                    "sha256": "model-sha",
+                    "path": "/srv/ai/models/private/model.safetensors",
+                },
+                "settings": {
+                    "seed": 123,
+                    "steps": 8,
+                    "cfg": 1.0,
+                    "width": 768,
+                    "height": 1344,
+                    "internal_only": "drop-me",
+                },
+                "outputs": [
+                    {
+                        "artifact_id": "artifact-1",
+                        "path": "/srv/ai-data/output/frame.png",
+                        "sha256": "output-sha",
+                        "source_path": "/internal/comfy/path",
+                    }
+                ],
+                "telemetry": {
+                    "observed_peak": {
+                        "vram_used_mb": 12000,
+                        "temperature_c": 72,
+                        "private_metric": "drop-me",
+                    }
+                },
+                "timing": {"duration_seconds": 12.5},
+            }
+        )
+
+        self.assertEqual(result["job_id"], "job-1")
+        self.assertEqual(result["settings"]["seed"], 123)
+        self.assertEqual(result["outputs"][0]["artifact_id"], "artifact-1")
+        self.assertEqual(result["peak"]["vram_used_mb"], 12000)
+        self.assertNotIn("path", result["model"])
+        self.assertNotIn("internal_only", result["settings"])
+        self.assertNotIn("source_path", result["outputs"][0])
+        self.assertNotIn("private_metric", result["peak"])
+
     def test_i2v_staging_replaces_stale_source_on_task_retry(self):
         old_root = config.asc_ai.get("input_root")
         try:
