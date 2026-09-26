@@ -86,6 +86,27 @@ def _chatterbox_root_url() -> str:
     return base_url[:-3] if base_url.endswith("/v1") else base_url
 
 
+def list_characters() -> list[str]:
+    try:
+        return asc_ai_character.list_characters(
+            _character_url(),
+            timeout=float(_setting("character_hub_timeout_seconds", 10)),
+        )
+    except asc_ai_character.CharacterHubError as exc:
+        raise AscAIError(str(exc)) from exc
+
+
+def get_character_identity(character_id: str) -> dict:
+    try:
+        return asc_ai_character.get_character(
+            _character_url(),
+            character_id,
+            timeout=float(_setting("character_hub_timeout_seconds", 10)),
+        )
+    except asc_ai_character.CharacterHubError as exc:
+        raise AscAIError(str(exc)) from exc
+
+
 def _request_json(
     method: str,
     url: str,
@@ -230,6 +251,10 @@ def health(params=None, *, stop_at: str = "video") -> dict:
                 ("prompt_llm", _prompt_llm_url() + "/health"),
             ]
         )
+        if str(
+            getattr(params, "director_character_id", "") if params is not None else ""
+        ).strip():
+            checks.append(("character_hub", _character_url() + "/health"))
     needs_visuals = video_source == "asc_ai" and stop_at in {"materials", "video"}
     if needs_visuals:
         checks.append(("image_adapter", _image_url() + "/health"))
