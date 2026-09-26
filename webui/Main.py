@@ -5106,14 +5106,23 @@ def _render_video_settings(panel, params):
             saved_video_source_name = str(
                 config.app.get("video_source", "asc_ai") or "asc_ai"
             )
-            params.video_source = grouped_selectbox(
-                tr("Video Source"),
-                groups=(
+            if asc_ai.local_only():
+                video_source_groups = (
+                    (tr("AI Video"), ("asc_ai",)),
+                    (tr("Local Material"), VIDEO_SOURCE_GROUPS["local"]),
+                )
+                if saved_video_source_name not in {"asc_ai", "local"}:
+                    saved_video_source_name = "asc_ai"
+            else:
+                video_source_groups = (
                     (tr("Stock Video"), VIDEO_SOURCE_GROUPS["stock_video"]),
                     (tr("AI Video"), VIDEO_SOURCE_GROUPS["ai_video"]),
                     (tr("AI Image"), VIDEO_SOURCE_GROUPS["ai_image"]),
                     (tr("Local Material"), VIDEO_SOURCE_GROUPS["local"]),
-                ),
+                )
+            params.video_source = grouped_selectbox(
+                tr("Video Source"),
+                groups=video_source_groups,
                 default_value=saved_video_source_name,
                 key="video_source_select",
                 format_func=video_source_labels.get,
@@ -6583,9 +6592,14 @@ def _render_background_music_settings(params, elevenlabs_api_key_rendered=False)
         (tr("Random Background Music"), "random"),
         (tr("Preset Song"), "preset"),
         (tr("Custom Background Music"), "custom"),
-        (tr("Sonilo Background Music"), "sonilo"),
-        (tr("ElevenLabs Background Music"), "elevenlabs"),
     ]
+    if not asc_ai.local_only():
+        bgm_options.extend(
+            [
+                (tr("Sonilo Background Music"), "sonilo"),
+                (tr("ElevenLabs Background Music"), "elevenlabs"),
+            ]
+        )
     selected_bgm_type = stable_selectbox(
         tr("Background Music Source"),
         options=[value for _, value in bgm_options],
@@ -6919,23 +6933,26 @@ def _render_audio_settings(panel, params):
 
             # Provider 下拉只负责选择自动配音服务；无配音已经由上方模式控制，
             # 不再作为 TTS Provider 混入列表，避免两个入口表达同一状态。
-            tts_servers = [
-                ("azure-tts-v1", "Azure TTS V1 (Edge TTS)"),
-                ("azure-tts-v2", "Azure TTS V2"),
-                ("siliconflow", "SiliconFlow TTS"),
-                ("gemini-tts", "Google Gemini TTS"),
-                ("mimo-tts", "Xiaomi MiMo TTS"),
-                ("minimax-tts", "MiniMax TTS"),
-                ("elevenlabs", "ElevenLabs TTS"),
-                ("chatterbox", "Chatterbox TTS"),
-                ("kokoro", "Kokoro TTS"),
-                ("fish_audio", "Fish Audio TTS"),
-                ("voxcpm", "VoxCPM TTS"),
-            ]
+            if asc_ai.local_only():
+                tts_servers = [("chatterbox", "Chatterbox TTS")]
+            else:
+                tts_servers = [
+                    ("azure-tts-v1", "Azure TTS V1 (Edge TTS)"),
+                    ("azure-tts-v2", "Azure TTS V2"),
+                    ("siliconflow", "SiliconFlow TTS"),
+                    ("gemini-tts", "Google Gemini TTS"),
+                    ("mimo-tts", "Xiaomi MiMo TTS"),
+                    ("minimax-tts", "MiniMax TTS"),
+                    ("elevenlabs", "ElevenLabs TTS"),
+                    ("chatterbox", "Chatterbox TTS"),
+                    ("kokoro", "Kokoro TTS"),
+                    ("fish_audio", "Fish Audio TTS"),
+                    ("voxcpm", "VoxCPM TTS"),
+                ]
 
             tts_server_values = [server_value for server_value, _ in tts_servers]
             if saved_tts_server not in tts_server_values:
-                saved_tts_server = "azure-tts-v1"
+                saved_tts_server = "chatterbox" if asc_ai.local_only() else "azure-tts-v1"
 
             if tts_mode_enabled:
                 selected_tts_server = stable_selectbox(
