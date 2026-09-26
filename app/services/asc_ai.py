@@ -336,7 +336,11 @@ def validate_local_only(params) -> None:
         raise AscAIError("local-only mode blocks automatic third-party publishing")
 
 
-def create_director_plan(params) -> dict:
+def create_director_plan(
+    params,
+    *,
+    settings_overrides: dict | None = None,
+) -> dict:
     if not enabled():
         raise AscAIError("ASC-AI integration is disabled")
     try:
@@ -350,9 +354,12 @@ def create_director_plan(params) -> dict:
                 character_id,
                 timeout=float(_setting("character_hub_timeout_seconds", 10)),
             )
+        director_settings = dict(config.asc_ai)
+        if settings_overrides:
+            director_settings.update(settings_overrides)
         plan = asc_ai_director.create_plan(
             params,
-            dict(config.asc_ai),
+            director_settings,
             scheduler_url=_scheduler_url(),
             prompt_llm_url=_prompt_llm_url(),
             character_identity=character_identity,
