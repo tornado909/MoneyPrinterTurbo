@@ -159,14 +159,44 @@ def _resolve_workflow(
     return max(rows, key=lambda row: _workflow_score(row, purpose=purpose))
 
 
-def _workflow_resolution(row: dict) -> tuple[int, int]:
-    value = str(row.get("default_resolution") or "")
-    match = re.fullmatch(r"(\d+)x(\d+)", value)
-    if not match:
+def _workflow_resolution(row: dict, aspect: Any = None) -> tuple[int, int]:
+    values = []
+    default_value = str(row.get("default_resolution") or "")
+    if default_value:
+        values.append(default_value)
+    supported = row.get("supported_resolutions") or []
+    if isinstance(supported, list):
+        values.extend(str(value) for value in supported)
+
+    candidates: list[tuple[int, int]] = []
+    for value in values:
+        match = re.fullmatch(r"(\d+)x(\d+)", value.strip())
+        if not match:
+            continue
+        pair = (int(match.group(1)), int(match.group(2)))
+        if pair not in candidates:
+            candidates.append(pair)
+    if not candidates:
         raise AscAIError(
-            f"ASC-AI workflow {row.get('workflow_id')} has invalid default resolution"
+            f"ASC-AI workflow {row.get('workflow_id')} has no valid resolution"
         )
-    return int(match.group(1)), int(match.group(2))
+
+    aspect_value = str(getattr(aspect, "value", aspect) or "").strip()
+    aspect_match = re.fullmatch(r"(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)", aspect_value)
+    if not aspect_match:
+        default_match = re.fullmatch(r"(\d+)x(\d+)", default_value)
+        if default_match:
+            return int(default_match.group(1)), int(default_match.group(2))
+        return candidates[0]
+
+    target_ratio = float(aspect_match.group(1)) / float(aspect_match.group(2))
+    return min(
+        candidates,
+        key=lambda pair: (
+            abs((pair[0] / pair[1]) - target_ratio),
+            -(pair[0] * pair[1]),
+        ),
+    )
 
 
 def _component_health(name: str, url: str) -> dict:
@@ -412,7 +442,31 @@ def director_terms(plan: dict) -> list[str]:
     return result
 
 
-def _image_binding() -> dict:
+def _workflow_by_id(workflow_id: str) -> dict | None:
+    workflow_id = str(workflow_id or "").strip()
+    if not workflow_id:
+        return None
+    for row in _workflow_catalog():
+        if (
+            str(row.get("workflow_id") or "") == workflow_id
+            and not row.get("operator_only")
+        ):
+            return row
+    return None
+
+
+def _image_binding(scene: dict | None = None) -> dict:
+    identity = (scene or {}).get("character_identity") or {}
+    refs = identity.get("reference_artifact_ids") or []
+    if refs:
+        for workflow_id in (
+            identity.get("preferred_workflow"),
+            identity.get("fallback_workflow"),
+        ):
+            row = _workflow_by_id(str(workflow_id or ""))
+            if row:
+                return row
+
     return _resolve_workflow(
         preferred_id=str(
             _setting("image_workflow_id", "lustify_krea_v10_native_int8.v1")
@@ -452,37 +506,96 @@ def generate_image(
     *,
     attempt: int = 1,
 ) -> str:
-    binding = _image_binding()
-    width, height = _workflow_resolution(binding)
+    binding = _image_binding(scene)
+    width, height = _workflow_resolution(binding, aspect)
     prompt = str(scene.get("visual_prompt") or "").strip()
     if not prompt:
         raise AscAIError("Director scene has no visual prompt")
+    identity = scene.get("character_identity") or {}
+    appearance = str(identity.get("appearance") or "").strip()
+    style_suffix = str(identity.get("style_prompt_suffix") or "").strip()
+    if appearance:
+        prompt = (
+            f"Recurring character identity anchor: {appearance}. "
+            f"Scene: {prompt}"
+        )
+    if style_suffix:
+        prompt = f"{prompt}. {style_suffix}"
+
+    generic_negative = str(
+        _setting(
+            "image_negative_prompt",
+            "text, watermark, logo, duplicate subjects, distorted anatomy, low quality",
+        )
+    ).strip()
+    negative_parts = [generic_negative] if generic_negative else []
+    negative_parts.extend(
+        str(value).strip()
+        for value in (identity.get("forbidden_traits") or [])
+        if str(value).strip()
+    )
+    negative_parts.extend(
+        str(value).strip()
+        for value in (identity.get("forbidden_prompt_terms") or [])
+        if str(value).strip()
+    )
+    negative_prompt = ", ".join(dict.fromkeys(negative_parts))
+
+    reference_inputs = [
+        {
+            "artifact_id": str(artifact_id),
+            "role": "CHARACTER",
+            "input_name": f"character_ref_{index}",
+        }
+        for index, artifact_id in enumerate(
+            (identity.get("reference_artifact_ids") or [])[:8]
+        )
+        if str(artifact_id).strip()
+    ]
+
+    loras = list(scene.get("image_loras") or [])
+    present_loras = {
+        str(row.get("model_id") or "")
+        for row in loras
+        if isinstance(row, dict)
+    }
+    for lora_id in (identity.get("lora_resource_ids") or [])[:4]:
+        lora_id = str(lora_id or "").strip()
+        if lora_id and lora_id not in present_loras:
+            loras.append({"model_id": lora_id, "strength": 1.0})
+            present_loras.add(lora_id)
+
     scene_id = str(scene.get("scene_id") or "scene")
+    overrides = {
+        "width": width,
+        "height": height,
+        "steps": int(_setting("image_steps", 8)),
+        "cfg": float(_setting("image_cfg", 1.0)),
+        "batch": 1,
+    }
+    if reference_inputs:
+        overrides["ref_boost"] = max(
+            0.25, min(2.0, float(identity.get("ref_boost") or 1.0))
+        )
+        overrides["grounding_px"] = max(
+            512, min(1536, int(identity.get("grounding_px") or 1024))
+        )
+
     payload = {
         "workflow_id": str(binding["workflow_id"]),
         "model_id": str(binding["model_id"]),
         "prompt": prompt,
         "original_user_prompt": prompt,
-        "prompt_compiler_id": "RAW",
-        "prompt_compiler_version": "mpt-director-v1",
-        "negative_prompt": str(
-            _setting(
-                "image_negative_prompt",
-                "text, watermark, logo, duplicate subjects, distorted anatomy, low quality",
-            )
-        ),
-        "overrides": {
-            "width": width,
-            "height": height,
-            "steps": int(_setting("image_steps", 8)),
-            "cfg": float(_setting("image_cfg", 1.0)),
-            "batch": 1,
-        },
+        "prompt_compiler_id": "CHARACTER_HUB" if identity else "RAW",
+        "prompt_compiler_version": "mpt-director-v2",
+        "negative_prompt": negative_prompt,
+        "reference_inputs": reference_inputs,
+        "overrides": overrides,
         "priority": int(_setting("priority", 120)),
         "idempotency_key": (
             f"mpt-{task_id}-{scene_id}-image-attempt-{max(1, int(attempt))}"
         )[:200],
-        "loras": list(scene.get("image_loras") or []),
+        "loras": loras,
         "experimental_resources_opt_in": False,
         "experimental_model_opt_in": False,
     }
