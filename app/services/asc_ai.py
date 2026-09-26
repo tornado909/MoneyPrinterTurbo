@@ -232,7 +232,10 @@ def enrich_director_plan(plan: dict) -> dict:
     Intelligence contributes its governed resource routing/provenance while the
     production Director remains authoritative for story continuity.
     """
-    if not bool(_setting("pi_enrich_video_scenes", True)):
+    # The current ASC-AI Prompt Intelligence router is local-first but may fall
+    # back to an external provider. PlanCreate has no per-request "local only"
+    # switch, so strict local-only production must never call /plans.
+    if local_only() or not bool(_setting("pi_enrich_video_scenes", False)):
         return plan
 
     scenes = []
