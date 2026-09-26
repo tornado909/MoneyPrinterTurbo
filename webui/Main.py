@@ -4945,7 +4945,9 @@ def _render_script_settings(panel, params):
             # 同时避免样式误伤页面顶部的“基础设置”等其他折叠区域。
             with st.container(key="advanced_settings_script"):
                 with st.expander(tr("Advanced Script Settings"), expanded=False):
-                    script_backend_options = ["local", "loomloom"]
+                    script_backend_options = (
+                        ["local"] if asc_ai.local_only() else ["local", "loomloom"]
+                    )
                     script_backend_labels = {
                         "local": tr("Local LLM Script Generation"),
                         "loomloom": tr("Shengsuan Cloud Batch Script Generation"),
