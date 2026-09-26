@@ -45,6 +45,7 @@ from app.models.schema import (
 )
 from app.services import bgm as bgm_service
 from app.services import (
+    asc_ai,
     cache_manager,
     llm,
     loomloom,
@@ -5130,7 +5131,113 @@ def _render_video_settings(panel, params):
                 )
 
             if params.video_source == "asc_ai":
+                params.director_enabled = True
                 st.caption(tr("ASC-AI Director Help"))
+
+                with st.expander(tr("Director Settings"), expanded=True):
+                    duration_col, video_scene_col = st.columns(2)
+                    with duration_col:
+                        params.director_target_duration_seconds = int(
+                            st.slider(
+                                tr("Director Target Duration"),
+                                min_value=5,
+                                max_value=300,
+                                value=int(
+                                    config.ui.get(
+                                        "director_target_duration_seconds",
+                                        params.director_target_duration_seconds,
+                                    )
+                                ),
+                                step=5,
+                                key="director_target_duration_seconds",
+                                help=tr("Director Target Duration Help"),
+                            )
+                        )
+                    with video_scene_col:
+                        params.director_max_local_video_scenes = int(
+                            st.slider(
+                                tr("Director Local Video Scenes"),
+                                min_value=0,
+                                max_value=6,
+                                value=int(
+                                    config.ui.get(
+                                        "director_max_local_video_scenes",
+                                        params.director_max_local_video_scenes,
+                                    )
+                                ),
+                                step=1,
+                                key="director_max_local_video_scenes",
+                                help=tr("Director Local Video Scenes Help"),
+                            )
+                        )
+
+                    params.director_style = st.text_input(
+                        tr("Director Visual Style"),
+                        value=str(
+                            config.ui.get(
+                                "director_style",
+                                params.director_style
+                                or config.asc_ai.get("director_style", ""),
+                            )
+                            or ""
+                        ),
+                        key="director_style",
+                    )
+                    audience_col, purpose_col = st.columns(2)
+                    with audience_col:
+                        params.director_audience = st.text_input(
+                            tr("Director Audience"),
+                            value=str(
+                                config.ui.get(
+                                    "director_audience", params.director_audience
+                                )
+                                or ""
+                            ),
+                            key="director_audience",
+                        )
+                    with purpose_col:
+                        params.director_purpose = st.text_input(
+                            tr("Director Purpose"),
+                            value=str(
+                                config.ui.get(
+                                    "director_purpose", params.director_purpose
+                                )
+                                or ""
+                            ),
+                            key="director_purpose",
+                        )
+
+                    _set_runtime_config(
+                        "ui",
+                        "director_target_duration_seconds",
+                        params.director_target_duration_seconds,
+                    )
+                    _set_runtime_config(
+                        "ui",
+                        "director_max_local_video_scenes",
+                        params.director_max_local_video_scenes,
+                    )
+                    _set_runtime_config("ui", "director_style", params.director_style)
+                    _set_runtime_config(
+                        "ui", "director_audience", params.director_audience
+                    )
+                    _set_runtime_config(
+                        "ui", "director_purpose", params.director_purpose
+                    )
+
+                    if st.button(
+                        tr("Check ASC-AI"),
+                        key="check_asc_ai_health",
+                        icon=":material/health_and_safety:",
+                    ):
+                        try:
+                            status = asc_ai.health()
+                            st.success(tr("ASC-AI Ready"))
+                            st.json(status, expanded=False)
+                        except asc_ai.AscAIError as exc:
+                            st.error(
+                                tr("ASC-AI Unavailable").format(error=str(exc))
+                            )
             if params.video_source == "wavespeed":
                 st.caption(tr("WaveSpeed AI Video Help"))
             if params.video_source == "volcengine_seedance":
