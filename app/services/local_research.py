@@ -18,6 +18,7 @@ class ResearchItem:
     extract: str
     page_id: int | None = None
     source: str = "wikipedia"
+    source_url: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -99,6 +100,11 @@ def wikipedia_research(
                 title=title,
                 extract=extract,
                 page_id=page_id if isinstance(page_id, int) else None,
+                source_url=(
+                    f"https://{lang}.wikipedia.org/?curid={page_id}"
+                    if isinstance(page_id, int)
+                    else ""
+                ),
             )
         )
     return [item.as_dict() for item in result]
