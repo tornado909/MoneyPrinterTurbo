@@ -370,7 +370,13 @@ def _output_path(result: dict, media_type: str) -> str:
     return path
 
 
-def generate_image(task_id: str, scene: dict, aspect: Any) -> str:
+def generate_image(
+    task_id: str,
+    scene: dict,
+    aspect: Any,
+    *,
+    attempt: int = 1,
+) -> str:
     binding = _image_binding()
     width, height = _workflow_resolution(binding)
     prompt = str(scene.get("visual_prompt") or "").strip()
@@ -398,7 +404,9 @@ def generate_image(task_id: str, scene: dict, aspect: Any) -> str:
             "batch": 1,
         },
         "priority": int(_setting("priority", 120)),
-        "idempotency_key": f"mpt-{task_id}-{scene_id}-image"[:200],
+        "idempotency_key": (
+            f"mpt-{task_id}-{scene_id}-image-attempt-{max(1, int(attempt))}"
+        )[:200],
         "loras": list(scene.get("image_loras") or []),
         "experimental_resources_opt_in": False,
         "experimental_model_opt_in": False,
@@ -433,11 +441,14 @@ def stage_image_for_video(task_id: str, scene_id: str, image_path: str) -> str:
     except ValueError as exc:
         raise AscAIError("unsafe ASC-AI input path") from exc
     target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        try:
-            os.link(source, target)
-        except OSError:
-            shutil.copy2(source, target)
+    # A task may be retried with the same task_id/scene_id after a better image
+    # was generated. Never leave a stale I2V source from a previous run.
+    if target.exists() or target.is_symlink():
+        target.unlink()
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
     return relative.as_posix()
 
 
@@ -633,7 +644,12 @@ def generate_scene_materials(
                 0, int(_setting("qc_max_image_regenerations", 1))
             )
             for attempt in range(max_regenerations + 1):
-                image_path = generate_image(task_id, working_scene, aspect)
+                image_path = generate_image(
+                    task_id,
+                    working_scene,
+                    aspect,
+                    attempt=attempt + 1,
+                )
                 image_qc = quality_control(
                     task_id, working_scene, image_path, media_kind="image"
                 )
