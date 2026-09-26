@@ -166,6 +166,53 @@ class TestAscAIController(unittest.TestCase):
         create_task.assert_not_called()
         preflight.assert_called_once()
 
+    def test_production_request_rejects_preset_without_local_filename(self):
+        response = self.client.post(
+            "/api/v1/asc-ai/production",
+            json={
+                "video_subject": "Теплица",
+                "bgm_type": "preset",
+                "bgm_file": "",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("bgm_file", response.text)
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    def test_production_normalizes_old_cloud_voice_to_local_chatterbox(
+        self, preflight, create_task
+    ):
+        old_tts = config.ui.get("tts_server")
+        old_voice = config.ui.get("voice_name")
+        try:
+            config.ui["tts_server"] = "azure-tts-v1"
+            config.ui["voice_name"] = "ru-RU-SvetlanaNeural"
+            create_task.return_value = {
+                "status": 200,
+                "message": "success",
+                "data": {"task_id": "task-voice"},
+            }
+            response = self.client.post(
+                "/api/v1/asc-ai/production",
+                json={"video_subject": "Теплица"},
+            )
+            self.assertEqual(response.status_code, 200)
+            task_request = preflight.call_args.args[0]
+            self.assertEqual(
+                task_request.voice_name,
+                "chatterbox:default-Female",
+            )
+        finally:
+            if old_tts is None:
+                config.ui.pop("tts_server", None)
+            else:
+                config.ui["tts_server"] = old_tts
+            if old_voice is None:
+                config.ui.pop("voice_name", None)
+            else:
+                config.ui["voice_name"] = old_voice
+
     def test_director_plan_rejects_invalid_aspect_before_service_call(self):
         with patch.object(
             asc_ai_controller.asc_ai, "create_director_plan"
