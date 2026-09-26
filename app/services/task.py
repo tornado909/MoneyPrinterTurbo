@@ -1657,7 +1657,20 @@ def _run_pipeline(
 
     # 仅完整视频生成流程才需要处理视频拼接模式；
     # 这样可以避免 /subtitle 和 /audio 这类请求访问不存在的字段。
-    if type(params.video_concat_mode) is str:
+    if director_plan:
+        # ASC-AI materials are already rendered in Director narrative order and
+        # carry their intended duration in each source clip. The generic stock
+        # pipeline's small max_clip_duration would otherwise truncate long
+        # still scenes and random mode could reorder the story.
+        params.video_concat_mode = VideoConcatMode.sequential
+        director_durations = [
+            max(2, min(15, int(scene.get("duration_seconds") or 5)))
+            for scene in (director_plan.get("scenes") or [])
+            if isinstance(scene, dict)
+        ]
+        if director_durations:
+            params.video_clip_duration = max(director_durations)
+    elif type(params.video_concat_mode) is str:
         params.video_concat_mode = VideoConcatMode(params.video_concat_mode)
 
     # 6. Generate final videos
