@@ -100,6 +100,24 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertEqual(kwargs["scheduler_url"], "http://scheduler:8090")
         self.assertEqual(kwargs["prompt_llm_url"], "http://prompt-llm:8080")
 
+    @patch("app.services.asc_ai._request_json")
+    def test_local_only_never_calls_prompt_intelligence_planning(self, request_json):
+        plan = {
+            "local_only": True,
+            "gpu_policy": "scheduler_managed",
+            "script": "Текст",
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "visual_strategy": "LOCAL_VIDEO",
+                    "visual_prompt": "modern greenhouse",
+                }
+            ],
+        }
+        result = asc_ai.enrich_director_plan(plan)
+        self.assertEqual(result, plan)
+        request_json.assert_not_called()
+
     @patch("app.services.asc_ai_qc.quality_control")
     def test_quality_control_uses_canonical_qc_module(self, qc):
         qc.return_value = {
@@ -170,6 +188,7 @@ class TestAscAIIntegration(unittest.TestCase):
             {},
             {},
             {"decision": "GRANTED", "lease": {"lease_id": "lease-1"}},
+            {"vram_used_mb": 1200},
             {},
             {
                 "choices": [
@@ -186,6 +205,7 @@ class TestAscAIIntegration(unittest.TestCase):
                     }
                 ]
             },
+            {"vram_used_mb": 1200},
             {},
             {},
         ]
