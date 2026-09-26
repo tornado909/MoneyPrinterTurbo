@@ -897,7 +897,7 @@ class TestVoiceService(unittest.TestCase):
         ) as post, patch.object(
             vs, "AudioFileClip", return_value=_FakeClip()
         ):
-            voice_file = str(Path(tmp_dir) / "chatterbox.mp3")
+            voice_file = str(Path(tmp_dir) / "chatterbox.wav")
             sub_maker = vs.chatterbox_tts(
                 text="Hello world. Second sentence.",
                 voice="default",
@@ -914,6 +914,7 @@ class TestVoiceService(unittest.TestCase):
         self.assertEqual(captured["json"]["voice"], "default")
         self.assertEqual(captured["json"]["input"], "Hello world. Second sentence.")
         self.assertAlmostEqual(captured["json"]["speed"], 1.2)
+        self.assertEqual(captured["json"]["response_format"], "wav")
         # api_key is forwarded as a bearer token
         self.assertEqual(captured["headers"].get("Authorization"), "Bearer secret")
         # volume is intentionally not part of the OpenAI speech payload
