@@ -1,0 +1,46 @@
+FROM python:3.11-slim
+
+ARG CHATTERBOX_API_SHA=a5f466128e4baa8e4cceb3bba9b7ca9de6f7ec6b
+ARG CHATTERBOX_MULTILINGUAL_SHA=c33cc0286ad166f14dd143c02c2a1c3309ab4727
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    PORT=4123 \
+    HOST=0.0.0.0 \
+    DEVICE=cpu \
+    USE_MULTILINGUAL_MODEL=true \
+    MODEL_CACHE_DIR=/cache \
+    VOICE_LIBRARY_DIR=/voices \
+    LONG_TEXT_DATA_DIR=/data/long_text_jobs \
+    VOICE_SAMPLE_PATH=/app/voice-sample.mp3 \
+    MAX_CHUNK_LENGTH=280 \
+    MAX_TOTAL_LENGTH=3000
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git curl ffmpeg libsndfile1 build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m venv "$VIRTUAL_ENV" \
+    && pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir torch torchaudio \
+         --index-url https://download.pytorch.org/whl/cpu \
+    && git clone https://github.com/travisvn/chatterbox-tts-api.git /src/chatterbox-api \
+    && cd /src/chatterbox-api \
+    && git checkout "$CHATTERBOX_API_SHA" \
+    && pip install --no-cache-dir \
+         fastapi 'uvicorn[standard]' python-dotenv python-multipart requests \
+         psutil pydub sse-starlette \
+    && pip install --no-cache-dir \
+         "git+https://github.com/travisvn/chatterbox-multilingual.git@$CHATTERBOX_MULTILINGUAL_SHA" \
+    && mkdir -p /app /cache /voices /data/long_text_jobs \
+    && cp -a app main.py voice-sample.mp3 /app/ \
+    && rm -rf /src
+
+WORKDIR /app
+EXPOSE 4123
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:4123/health || exit 1
+
+CMD ["python", "main.py"]
