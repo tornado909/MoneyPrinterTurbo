@@ -355,6 +355,37 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertIsNone(result["semantic_score"])
 
     @patch("app.services.asc_ai_qc.requests.post")
+    def test_structural_qc_registers_artifact_without_vlm_call(self, post):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scene.png"
+            path.write_bytes(b"non-empty-generated-artifact")
+            upload = MagicMock()
+            upload.raise_for_status.return_value = None
+            upload.json.return_value = {"artifact_id": "art-structural"}
+            post.return_value = upload
+
+            result = asc_ai_qc.quality_control(
+                prompt_url="http://prompt:8094",
+                visual_url="http://visual:8095",
+                task_id="task",
+                scene={"scene_id": "scene_02", "visual_prompt": "greenhouse"},
+                media_path=str(path),
+                media_kind="image",
+                run_visual_analysis=False,
+            )
+
+            self.assertTrue(result["passed"])
+            self.assertTrue(result["visual_analysis_skipped"])
+            self.assertEqual(result["provider"], "local-structural")
+            self.assertEqual(result["artifact_id"], "art-structural")
+            self.assertEqual(post.call_count, 1)
+            self.assertTrue(
+                post.call_args.args[0].endswith(
+                    "/api/v1/prompt-intelligence/artifacts"
+                )
+            )
+
+    @patch("app.services.asc_ai_qc.requests.post")
     def test_qc_calls_real_evidence_endpoint_and_forbids_external_egress(self, post):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scene.png"
