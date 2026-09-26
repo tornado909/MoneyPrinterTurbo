@@ -2254,7 +2254,7 @@ def chatterbox_tts(
         logger.error("Chatterbox TTS text is empty")
         return None
 
-    base_url = (config.chatterbox.get("base_url", "") or "").strip().rstrip("/")
+    base_url = (os.getenv("MPT_CHATTERBOX_BASE_URL") or config.chatterbox.get("base_url", "") or "").strip().rstrip("/")
     if not base_url:
         logger.error(
             "Chatterbox base_url is not set, please configure [chatterbox] base_url in config.toml"
@@ -2263,7 +2263,7 @@ def chatterbox_tts(
 
     api_key = config.chatterbox.get("api_key", "")
     if not model_id:
-        model_id = config.chatterbox.get("model_id", "chatterbox") or "chatterbox"
+        model_id = config.chatterbox.get("model_id", "tts-1") or "tts-1"
 
     return _openai_compatible_tts(
         "chatterbox", base_url, api_key, model_id, voice, text, voice_rate, voice_file
