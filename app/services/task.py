@@ -1628,6 +1628,13 @@ def _run_pipeline(
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
 
+    if director_plan:
+        director_plan = asc_ai.retime_director_plan(
+            director_plan,
+            audio_duration,
+        )
+        asc_ai.persist_execution_plan(task_id, director_plan)
+
     # 5. Get video materials
     downloaded_videos = get_video_materials(
         task_id,
