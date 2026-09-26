@@ -124,6 +124,9 @@ class VideoParams(BaseModel):
     director_audience: str = Field(default="", max_length=1000)
     director_purpose: str = Field(default="", max_length=1000)
     director_character_id: str = Field(default="", max_length=128)
+    # None follows global [asc_ai] public_research_enabled; True/False is a
+    # per-task override used by WebUI/headless ASC-AI production requests.
+    director_public_research_enabled: Optional[bool] = None
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )
