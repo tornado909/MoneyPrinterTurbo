@@ -329,16 +329,22 @@ def create_plan(params, settings: dict, *, scheduler_url: str, prompt_llm_url: s
     language = (params.video_language or "ru-RU").split("-", 1)[0]
 
     research_items = []
-    if bool(settings.get("research_enabled", True)):
+    research_enabled = bool(
+        settings.get(
+            "public_research_enabled",
+            settings.get("research_enabled", True),
+        )
+    )
+    if research_enabled:
         try:
             research_items = local_research.wikipedia_research(
                 str(params.video_subject or ""),
                 language=language,
-                max_pages=int(settings.get("research_max_pages", 3)),
+                max_pages=int(settings.get("research_max_pages", 2)),
                 max_chars_per_page=int(
-                    settings.get("research_max_chars_per_page", 1800)
+                    settings.get("research_max_chars_per_page", 1200)
                 ),
-                timeout=float(settings.get("research_timeout_seconds", 10)),
+                timeout=float(settings.get("research_timeout_seconds", 8)),
             )
         except local_research.ResearchError:
             research_items = []
@@ -346,10 +352,7 @@ def create_plan(params, settings: dict, *, scheduler_url: str, prompt_llm_url: s
     research_context = ""
     if research_items:
         research_lines = [
-            (
-                f"- {item.get('title')}: {item.get('extract')} "
-                f"(source: {item.get('source_url')})"
-            )
+            f"- {item.get('title')}: {item.get('extract')}"
             for item in research_items
         ]
         research_context = (
