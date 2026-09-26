@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Literal
 
 from fastapi import Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.config import config
 from app.controllers import base
@@ -59,16 +59,30 @@ class ProductionRequest(DirectorPlanRequest):
     subtitle_enabled: bool = True
     bgm_type: Literal["", "random", "preset"] = "random"
     bgm_volume: float = Field(default=0.2, ge=0.0, le=1.0)
+    bgm_file: str = Field(default="", max_length=255)
     voice_name: str = Field(default="", max_length=200)
     voice_volume: float = Field(default=1.0, ge=0.1, le=2.0)
     voice_rate: float = Field(default=1.0, ge=0.5, le=2.0)
     video_count: int = Field(default=1, ge=1, le=4)
+
+    @model_validator(mode="after")
+    def validate_local_media_options(self):
+        if self.bgm_type == "preset" and not self.bgm_file.strip():
+            raise ValueError("bgm_file is required when bgm_type=preset")
+        return self
 
     def to_task_request(self) -> TaskVideoRequest:
         configured_voice = str(
             config.ui.get("voice_name", "chatterbox:default-Female")
             or "chatterbox:default-Female"
         )
+        configured_tts = str(
+            config.ui.get("tts_server", "chatterbox") or "chatterbox"
+        )
+        if configured_tts != "chatterbox" or not configured_voice.startswith(
+            "chatterbox:"
+        ):
+            configured_voice = "chatterbox:default-Female"
         return TaskVideoRequest(
             video_subject=self.video_subject,
             video_script=self.video_script,
@@ -85,6 +99,7 @@ class ProductionRequest(DirectorPlanRequest):
             director_public_research_enabled=self.public_research_enabled,
             subtitle_enabled=self.subtitle_enabled,
             bgm_type=self.bgm_type,
+            bgm_file=self.bgm_file,
             bgm_volume=self.bgm_volume,
             voice_name=self.voice_name or configured_voice,
             voice_volume=self.voice_volume,
