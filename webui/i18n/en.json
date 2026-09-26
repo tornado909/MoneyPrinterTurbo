@@ -570,6 +570,8 @@
     "MuAPI Billing Notice Without Script": "Each generated clip is billed by MuAPI. Enter or generate the video script to see an estimated task count.",
     "Confirm MuAPI Charge": "I understand MuAPI video generation creates paid tasks",
     "Confirm MuAPI Charge Help": "MuAPI clips are submitted one at a time and stop once they cover the voiceover duration. An ambiguous submission is not retried because it may already have created a billable remote task.",
-    "Confirm MuAPI Charge Required": "Please confirm the MuAPI charge before generating the video."
+    "Confirm MuAPI Charge Required": "Please confirm the MuAPI charge before generating the video.",
+    "ASC-AI Director": "ASC-AI Director (Local)",
+    "ASC-AI Director Help": "Local pipeline: scheduler-backed Qwen Director → ASC-AI Image Adapter → local image/Wan I2V. No paid AI API is used."
   }
 }
