@@ -583,6 +583,8 @@
     "Director Purpose": "Video purpose",
     "Check ASC-AI": "Check ASC-AI",
     "ASC-AI Ready": "ASC-AI services are reachable",
-    "ASC-AI Unavailable": "ASC-AI preflight failed: {error}"
+    "ASC-AI Unavailable": "ASC-AI preflight failed: {error}",
+    "Director Public Research": "Public factual research",
+    "Director Public Research Help": "Send only the video topic to Wikipedia/MediaWiki and feed up to two short public extracts to the local Director. No paid AI API is used. Disable this for private or purely creative topics."
   }
 }
