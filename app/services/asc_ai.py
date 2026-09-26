@@ -170,7 +170,7 @@ def _component_health(name: str, url: str) -> dict:
     return result
 
 
-def health(params=None) -> dict:
+def health(params=None, *, stop_at: str = "video") -> dict:
     """Check only dependencies required by the current local production path."""
     director_enabled = (
         bool(getattr(params, "director_enabled", True))
@@ -193,7 +193,8 @@ def health(params=None) -> dict:
                 ("prompt_llm", _prompt_llm_url() + "/health"),
             ]
         )
-    if video_source == "asc_ai":
+    needs_visuals = video_source == "asc_ai" and stop_at in {"materials", "video"}
+    if needs_visuals:
         checks.append(("image_adapter", _image_url() + "/health"))
         if bool(_setting("qc_enabled", True)):
             checks.extend(
@@ -202,7 +203,16 @@ def health(params=None) -> dict:
                     ("visual_analyzer", _visual_url() + "/health"),
                 ]
             )
-    if voice_mode == "tts" and tts_server == "chatterbox":
+    custom_audio = str(
+        getattr(params, "custom_audio_file", "") if params is not None else ""
+    ).strip()
+    needs_audio = stop_at not in {"script", "terms"}
+    if (
+        needs_audio
+        and not custom_audio
+        and voice_mode == "tts"
+        and tts_server == "chatterbox"
+    ):
         checks.append(("chatterbox_tts", _chatterbox_root_url() + "/health"))
 
     result = {}
@@ -215,11 +225,11 @@ def health(params=None) -> dict:
     return result
 
 
-def preflight(params) -> dict:
+def preflight(params, *, stop_at: str = "video") -> dict:
     if not enabled():
         return {}
     validate_local_only(params)
-    return health(params)
+    return health(params, stop_at=stop_at)
 
 
 def validate_local_only(params) -> None:
