@@ -131,6 +131,98 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertEqual(kwargs["scheduler_url"], "http://scheduler:8090")
         self.assertEqual(kwargs["prompt_llm_url"], "http://prompt-llm:8080")
 
+    @patch("app.services.asc_ai_director.create_plan")
+    @patch("app.services.asc_ai_character.get_character")
+    def test_director_loads_selected_character_identity(
+        self, get_character, create_plan
+    ):
+        identity = {
+            "character_id": "aria",
+            "name": "Aria",
+            "appearance": "platinum short hair",
+            "reference_artifact_ids": ["ref-1"],
+        }
+        get_character.return_value = identity
+        create_plan.return_value = {
+            "schema_version": "mpt.director.v2",
+            "local_only": True,
+            "gpu_policy": "scheduler_managed",
+            "script": "Текст",
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "visual_prompt": "city street",
+                }
+            ],
+        }
+        params = self.params(director_character_id="aria")
+        result = asc_ai.create_director_plan(params)
+
+        self.assertEqual(result["character_identity"]["character_id"], "aria")
+        self.assertEqual(
+            result["scenes"][0]["character_identity"]["character_id"], "aria"
+        )
+        self.assertEqual(
+            create_plan.call_args.kwargs["character_identity"], identity
+        )
+
+    @patch("app.services.asc_ai._output_path", return_value="/tmp/generated.png")
+    @patch("app.services.asc_ai._request_json", return_value={"outputs": [{"path": "/tmp/generated.png"}]})
+    @patch("app.services.asc_ai._workflow_catalog")
+    def test_character_identity_request_uses_references_lora_and_portrait_resolution(
+        self, catalog, request_json, _output
+    ):
+        catalog.return_value = [
+            {
+                "workflow_id": "krea_identity_reference.v1",
+                "purpose": "identity_reference",
+                "model_id": "runtime-krea-model",
+                "operator_only": False,
+                "validation_state": "production",
+                "default_resolution": "1024x1024",
+                "supported_resolutions": [
+                    "1024x1024",
+                    "768x1344",
+                    "1344x768",
+                ],
+            }
+        ]
+        scene = {
+            "scene_id": "scene_01",
+            "visual_prompt": "walking through a neon street",
+            "character_identity": {
+                "character_id": "aria",
+                "appearance": "adult woman, platinum short hair, amber right eye",
+                "forbidden_traits": ["long red hair"],
+                "forbidden_prompt_terms": ["identity drift"],
+                "reference_artifact_ids": ["ref-face", "ref-body"],
+                "lora_resource_ids": ["lora-character"],
+                "preferred_workflow": "krea_identity_reference.v1",
+                "ref_boost": 1.1,
+                "grounding_px": 1024,
+            },
+        }
+
+        asc_ai.generate_image("task", scene, "9:16", attempt=1)
+        payload = request_json.call_args.kwargs["json"]
+
+        self.assertEqual(payload["workflow_id"], "krea_identity_reference.v1")
+        self.assertEqual(payload["model_id"], "runtime-krea-model")
+        self.assertEqual(payload["overrides"]["width"], 768)
+        self.assertEqual(payload["overrides"]["height"], 1344)
+        self.assertEqual(
+            [row["artifact_id"] for row in payload["reference_inputs"]],
+            ["ref-face", "ref-body"],
+        )
+        self.assertIn(
+            {"model_id": "lora-character", "strength": 1.0},
+            payload["loras"],
+        )
+        self.assertIn("platinum short hair", payload["prompt"])
+        self.assertIn("long red hair", payload["negative_prompt"])
+        self.assertEqual(payload["prompt_compiler_id"], "CHARACTER_HUB")
+
     @patch("app.services.asc_ai._request_json")
     def test_local_only_never_calls_prompt_intelligence_planning(self, request_json):
         plan = {
