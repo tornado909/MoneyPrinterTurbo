@@ -50,6 +50,13 @@ def _image_url() -> str:
     ).rstrip("/")
 
 
+def _visual_url() -> str:
+    return (
+        os.getenv("ASC_AI_VISUAL_ANALYZER_URL")
+        or str(_setting("visual_analyzer_url", "http://127.0.0.1:8095"))
+    ).rstrip("/")
+
+
 def _request_json(
     method: str,
     url: str,
@@ -142,6 +149,9 @@ def health() -> dict:
         ),
         "image_adapter": _request_json(
             "GET", _image_url() + "/health", timeout=(3, 10)
+        ),
+        "visual_analyzer": _request_json(
+            "GET", _visual_url() + "/health", timeout=(3, 10)
         ),
     }
 
@@ -393,6 +403,101 @@ def generate_video_from_image(task_id: str, scene: dict, image_path: str) -> str
     return _output_path(result, "video")
 
 
+def stage_for_qc(
+    task_id: str,
+    scene_id: str,
+    media_path: str,
+) -> str:
+    input_root = Path(str(_setting("input_root", "/srv/ai-data/input"))).resolve()
+    source = Path(media_path).resolve()
+    if not source.is_file():
+        raise AscAIError("production QC source is missing")
+    suffix = source.suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".mov", ".mkv"}:
+        raise AscAIError("production QC source has an unsupported extension")
+    relative = (
+        Path("moneyprinterturbo")
+        / _safe_token(task_id)
+        / "qc"
+        / (_safe_token(scene_id) + suffix)
+    )
+    target = (input_root / relative).resolve()
+    try:
+        target.relative_to(input_root)
+    except ValueError as exc:
+        raise AscAIError("unsafe production QC input path") from exc
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.unlink()
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+    return relative.as_posix()
+
+
+def quality_control(
+    task_id: str,
+    scene: dict,
+    media_path: str,
+    *,
+    media_kind: str,
+) -> dict:
+    if not bool(_setting("qc_enabled", True)):
+        return {
+            "passed": True,
+            "semantic_score": 1.0,
+            "technical_score": 1.0,
+            "issues": [],
+            "retry_prompt": "",
+            "skipped": True,
+        }
+    scene_id = str(scene.get("scene_id") or "scene")
+    input_name = stage_for_qc(
+        task_id,
+        f"{scene_id}-{media_kind}",
+        media_path,
+    )
+    expected = str(scene.get("visual_prompt") or "").strip()
+    if media_kind == "video":
+        motion = str(scene.get("motion_prompt") or "").strip()
+        if motion:
+            expected = f"{expected}. Expected motion: {motion}"
+    payload = {
+        "input_name": input_name,
+        "expected_prompt": expected,
+        "profile": str(_setting("qc_profile", "FAST")),
+    }
+    result = _request_json(
+        "POST",
+        _visual_url() + "/api/v1/production/qc",
+        json=payload,
+        timeout=(5, float(_setting("qc_timeout_seconds", 300))),
+    )
+    if result.get("external_egress") is not False:
+        raise AscAIError("production QC violated the local-only egress contract")
+    observation = result.get("production_qc")
+    if not isinstance(observation, dict):
+        raise AscAIError("production QC returned no typed observation")
+    semantic = float(observation.get("semantic_score", 0))
+    technical = float(observation.get("technical_score", 0))
+    catastrophic = bool(observation.get("catastrophic_artifacts", False))
+    passed = (
+        not catastrophic
+        and semantic >= float(_setting("qc_min_semantic_score", 0.65))
+        and technical >= float(_setting("qc_min_technical_score", 0.75))
+    )
+    return {
+        **observation,
+        "passed": passed,
+        "semantic_score": semantic,
+        "technical_score": technical,
+        "provider": result.get("provider"),
+        "provider_model": result.get("provider_model"),
+        "skipped": False,
+    }
+
+
 def generate_scene_materials(
     task_id: str,
     plan: dict,
@@ -408,13 +513,58 @@ def generate_scene_materials(
     required = max(float(audio_duration or 0), 0.1)
     clip_seconds = max(1, int(clip_duration or 5))
     for scene in scenes:
-        image_path = generate_image(task_id, scene, aspect)
+        working_scene = dict(scene)
+        image_path = ""
+        image_qc = None
+        max_regenerations = max(0, int(_setting("qc_max_image_regenerations", 1)))
+        for attempt in range(max_regenerations + 1):
+            image_path = generate_image(task_id, working_scene, aspect)
+            image_qc = quality_control(
+                task_id, working_scene, image_path, media_kind="image"
+            )
+            if image_qc.get("passed"):
+                break
+            if attempt < max_regenerations:
+                retry_prompt = str(image_qc.get("retry_prompt") or "").strip()
+                if retry_prompt:
+                    working_scene["visual_prompt"] = retry_prompt
+                logger.warning(
+                    "ASC-AI image QC requested one local regeneration: "
+                    f"scene={scene.get('scene_id')}, "
+                    f"semantic={image_qc.get('semantic_score')}, "
+                    f"technical={image_qc.get('technical_score')}"
+                )
+        if not image_qc or not image_qc.get("passed"):
+            if bool(_setting("qc_required", True)):
+                issues = ", ".join((image_qc or {}).get("issues") or [])
+                raise AscAIError(
+                    "ASC-AI image failed local production QC: "
+                    f"scene={scene.get('scene_id')}, issues={issues or 'score below threshold'}"
+                )
+            logger.warning(
+                f"ASC-AI image QC did not pass but qc_required=false: "
+                f"scene={scene.get('scene_id')}"
+            )
+
         output_path = ""
         if scene.get("visual_strategy") == "LOCAL_VIDEO":
             try:
-                output_path = generate_video_from_image(
-                    task_id, scene, image_path
+                candidate_video = generate_video_from_image(
+                    task_id, working_scene, image_path
                 )
+                video_qc = quality_control(
+                    task_id, working_scene, candidate_video, media_kind="video"
+                )
+                if video_qc.get("passed"):
+                    output_path = candidate_video
+                else:
+                    logger.warning(
+                        "ASC-AI local video failed production QC; using the "
+                        "already-approved still instead: "
+                        f"scene={scene.get('scene_id')}, "
+                        f"semantic={video_qc.get('semantic_score')}, "
+                        f"technical={video_qc.get('technical_score')}"
+                    )
             except Exception as exc:
                 if not bool(_setting("video_fallback_to_image", True)):
                     raise
