@@ -585,6 +585,11 @@
     "ASC-AI Ready": "ASC-AI services are reachable",
     "ASC-AI Unavailable": "ASC-AI preflight failed: {error}",
     "Director Public Research": "Public factual research",
-    "Director Public Research Help": "Send only the video topic to Wikipedia/MediaWiki and feed up to two short public extracts to the local Director. No paid AI API is used. Disable this for private or purely creative topics."
+    "Director Public Research Help": "Send only the video topic to Wikipedia/MediaWiki and feed up to two short public extracts to the local Director. No paid AI API is used. Disable this for private or purely creative topics.",
+    "Director Character": "Recurring Character",
+    "No Director Character": "No Character Hub identity",
+    "Director Character Help": "Optional. Select a Character Hub identity to anchor the same character across generated scenes. Canonical reference artifacts/LoRA are used when the manifest provides them.",
+    "Director Character Summary": "{name} · {kind} · references: {refs} · LoRA: {loras}",
+    "Character Hub Unavailable": "Character Hub is unavailable: {error}"
   }
 }
