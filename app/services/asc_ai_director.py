@@ -344,6 +344,17 @@ def create_plan(
     )
     if research_enabled:
         try:
+            raw_fallback_languages = settings.get(
+                "research_fallback_languages", ["en"]
+            )
+            if isinstance(raw_fallback_languages, str):
+                fallback_languages = tuple(
+                    item.strip()
+                    for item in raw_fallback_languages.split(",")
+                    if item.strip()
+                )
+            else:
+                fallback_languages = tuple(raw_fallback_languages or ["en"])
             research_items = local_research.wikipedia_research(
                 str(params.video_subject or ""),
                 language=language,
@@ -352,6 +363,10 @@ def create_plan(
                     settings.get("research_max_chars_per_page", 1200)
                 ),
                 timeout=float(settings.get("research_timeout_seconds", 8)),
+                fallback_languages=fallback_languages,
+                cache_ttl_seconds=float(
+                    settings.get("research_cache_ttl_seconds", 3600)
+                ),
             )
         except local_research.ResearchError:
             research_items = []
