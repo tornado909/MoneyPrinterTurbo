@@ -201,7 +201,7 @@ class TestAscAIController(unittest.TestCase):
             task_request = preflight.call_args.args[0]
             self.assertEqual(
                 task_request.voice_name,
-                "chatterbox:default-Female",
+                "chatterbox:ru-default",
             )
         finally:
             if old_tts is None:
