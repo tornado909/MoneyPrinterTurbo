@@ -589,6 +589,9 @@ model_id = "kokoro"
 # Voice names (af_heart, bf_emma, hf_alpha, ...). Leave empty to read the list
 # from the server (GET {base_url}/audio/voices).
 voices = []
+# The Russian ASC-AI production path expects this voice to exist in the local
+# Chatterbox voice library with language=ru. Upload it once via /v1/voices.
+default_voice = "ru-default"
 
 [fish_audio]
 # Fish Audio TTS service: https://fish.audio
@@ -727,7 +730,7 @@ video_language = "ru-RU"
 # video_clip_speed = 1.0
 # video_count = 1
 tts_server = "chatterbox"
-voice_name = "chatterbox:default-Female"
+voice_name = "chatterbox:ru-default"
 voice_mode = "tts"                 # "tts", "upload", or "none"
 # voice_volume = 1.0
 # voice_rate = 1.0
