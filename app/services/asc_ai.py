@@ -895,6 +895,7 @@ def quality_control(
     media_path: str,
     *,
     media_kind: str,
+    run_visual_analysis: bool = True,
 ) -> dict:
     if not bool(_setting("qc_enabled", True)):
         return {
@@ -917,6 +918,7 @@ def quality_control(
             profile=str(_setting("qc_profile", "FAST")),
             upload_timeout=float(_setting("qc_upload_timeout_seconds", 120)),
             timeout=float(_setting("qc_timeout_seconds", 300)),
+            run_visual_analysis=run_visual_analysis,
         )
     except asc_ai_qc.QCError as exc:
         raise AscAIError(str(exc)) from exc
@@ -987,7 +989,7 @@ def generate_scene_materials(
     persist_production_manifest(task_id, manifest)
 
     try:
-        for scene in scenes:
+        for scene_index, scene in enumerate(scenes):
             working_scene = dict(scene)
             scene_binding = _image_binding(working_scene)
             scene_width, scene_height = _workflow_resolution(
@@ -1042,8 +1044,33 @@ def generate_scene_materials(
                     image_path, image_execution = image_result
                 else:
                     image_path, image_execution = image_result, None
+                qc_policy = str(
+                    _setting("qc_image_policy", "adaptive") or "adaptive"
+                ).lower()
+                qc_stride = max(1, int(_setting("qc_image_vlm_stride", 3)))
+                has_identity = bool(
+                    (working_scene.get("character_identity") or {}).get(
+                        "character_id"
+                    )
+                )
+                run_image_vlm = (
+                    qc_policy == "full"
+                    or (
+                        qc_policy == "adaptive"
+                        and (
+                            scene_index == 0
+                            or scene_index % qc_stride == 0
+                            or has_identity
+                            or attempt > 0
+                        )
+                    )
+                )
                 image_qc = quality_control(
-                    task_id, working_scene, image_path, media_kind="image"
+                    task_id,
+                    working_scene,
+                    image_path,
+                    media_kind="image",
+                    run_visual_analysis=run_image_vlm,
                 )
                 scene_record["image_attempts"].append(
                     {
