@@ -650,6 +650,14 @@ director_priority = 150
 director_temperature = 0.45
 director_max_tokens = 3500
 director_style = "cinematic documentary realism, clean composition"
+# Optional free public factual grounding. Only the video topic is sent to
+# MediaWiki; extracts and source URLs are stored in director-plan.json.
+public_research_enabled = true
+research_max_pages = 2
+research_max_chars_per_page = 1200
+research_timeout_seconds = 8
+generic_text_temperature = 0.35
+generic_text_max_tokens = 2500
 # Optional extra Prompt Intelligence planning for LOCAL_VIDEO scenes.
 # Forced OFF while local_only=true because current ASC-AI PI is local-first and
 # can fall back to an external provider when local planning fails.
