@@ -1,0 +1,368 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+from pathlib import Path
+from typing import Any
+
+import requests
+from loguru import logger
+
+from app.config import config
+from app.services import video
+from app.utils import utils
+
+
+class AscAIError(RuntimeError):
+    pass
+
+
+_LOCAL_VIDEO_SOURCES = {"asc_ai", "local"}
+_LOCAL_TTS_SERVERS = {"chatterbox"}
+_LOCAL_BGM_TYPES = {"", "none", "random", "local", "custom"}
+
+
+def _setting(name: str, default: Any = None) -> Any:
+    return config.asc_ai.get(name, default)
+
+
+def enabled() -> bool:
+    return bool(_setting("enabled", True))
+
+
+def local_only() -> bool:
+    return bool(_setting("local_only", True))
+
+
+def _prompt_url() -> str:
+    return (
+        os.getenv("ASC_AI_PROMPT_URL")
+        or str(_setting("prompt_intelligence_url", "http://127.0.0.1:8094"))
+    ).rstrip("/")
+
+
+def _image_url() -> str:
+    return (
+        os.getenv("ASC_AI_IMAGE_ADAPTER_URL")
+        or str(_setting("image_adapter_url", "http://127.0.0.1:8091"))
+    ).rstrip("/")
+
+
+def _request_json(
+    method: str,
+    url: str,
+    *,
+    timeout: tuple[float, float] = (5, 900),
+    **kwargs,
+) -> dict:
+    try:
+        response = requests.request(method, url, timeout=timeout, **kwargs)
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        raise AscAIError(f"ASC-AI request failed: {type(exc).__name__}") from exc
+    except ValueError as exc:
+        raise AscAIError("ASC-AI returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise AscAIError("ASC-AI returned a non-object response")
+    return payload
+
+
+def health() -> dict:
+    return {
+        "director": _request_json(
+            "GET",
+            _prompt_url() + "/api/v1/prompt-intelligence/director/capabilities",
+            timeout=(3, 10),
+        ),
+        "image_adapter": _request_json(
+            "GET", _image_url() + "/health", timeout=(3, 10)
+        ),
+    }
+
+
+def validate_local_only(params) -> None:
+    if not enabled() or not local_only():
+        return
+    if params.video_source not in _LOCAL_VIDEO_SOURCES:
+        raise AscAIError(
+            "local-only mode allows only ASC-AI or user-provided local visual materials"
+        )
+    voice_mode = str(config.ui.get("voice_mode", "tts") or "tts")
+    tts_server = str(config.ui.get("tts_server", "chatterbox") or "chatterbox")
+    if voice_mode == "tts" and tts_server not in _LOCAL_TTS_SERVERS:
+        raise AscAIError(
+            "local-only mode requires self-hosted Chatterbox TTS or uploaded/no voice"
+        )
+    subtitle_provider = str(
+        config.app.get("subtitle_provider", "whisper") or "whisper"
+    )
+    if params.subtitle_enabled and subtitle_provider != "whisper":
+        raise AscAIError("local-only mode requires local Whisper subtitles")
+    if str(params.bgm_type or "").lower() not in _LOCAL_BGM_TYPES:
+        raise AscAIError("local-only mode blocks remote AI music providers")
+    if bool(config.app.get("upload_post_auto_upload", False)):
+        raise AscAIError("local-only mode blocks automatic third-party publishing")
+
+
+def create_director_plan(params) -> dict:
+    if not enabled():
+        raise AscAIError("ASC-AI integration is disabled")
+    aspect = getattr(params.video_aspect, "value", params.video_aspect) or "9:16"
+    target_duration = int(
+        getattr(params, "director_target_duration_seconds", 0)
+        or _setting("director_target_duration_seconds", 45)
+    )
+    max_video_scenes = int(
+        getattr(params, "director_max_local_video_scenes", 0)
+        if getattr(params, "director_max_local_video_scenes", None) is not None
+        else _setting("director_max_local_video_scenes", 1)
+    )
+    payload = {
+        "topic": params.video_subject,
+        "script": params.video_script or "",
+        "language": (params.video_language or "ru-RU").split("-", 1)[0],
+        "target_duration_seconds": target_duration,
+        "aspect_ratio": str(aspect),
+        "scene_duration_seconds": int(
+            _setting("director_scene_duration_seconds", 7)
+        ),
+        "max_local_video_scenes": max_video_scenes,
+        "style": getattr(params, "director_style", "")
+        or str(_setting("director_style", "")),
+        "audience": getattr(params, "director_audience", ""),
+        "purpose": getattr(params, "director_purpose", ""),
+    }
+    plan = _request_json(
+        "POST",
+        _prompt_url() + "/api/v1/prompt-intelligence/director/plan",
+        json=payload,
+        timeout=(5, float(_setting("director_timeout_seconds", 420))),
+    )
+    if not plan.get("local_only") or plan.get("gpu_policy") != "scheduler_managed":
+        raise AscAIError(
+            "Director did not return the required local-only scheduler policy"
+        )
+    scenes = plan.get("scenes")
+    if not isinstance(scenes, list) or not scenes:
+        raise AscAIError("Director returned no scenes")
+    return plan
+
+
+def persist_director_plan(task_id: str, plan: dict) -> str:
+    target = Path(utils.task_dir(task_id)) / "director-plan.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".json.partial")
+    temporary.write_text(
+        json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    os.replace(temporary, target)
+    return str(target)
+
+
+def director_terms(plan: dict) -> list[str]:
+    result = []
+    for scene in plan.get("scenes") or []:
+        prompt = str(scene.get("visual_prompt") or "").strip()
+        if prompt:
+            result.append(prompt)
+    return result
+
+
+def _dimensions(aspect: Any) -> tuple[int, int]:
+    value = str(getattr(aspect, "value", aspect) or "9:16")
+    if value == "16:9":
+        return int(_setting("image_landscape_width", 1536)), int(
+            _setting("image_landscape_height", 1152)
+        )
+    if value == "1:1":
+        return int(_setting("image_square_width", 1344)), int(
+            _setting("image_square_height", 1344)
+        )
+    return int(_setting("image_portrait_width", 1152)), int(
+        _setting("image_portrait_height", 1536)
+    )
+
+
+def _output_path(result: dict, media_type: str) -> str:
+    outputs = result.get("outputs") or []
+    if not outputs or not isinstance(outputs[0], dict):
+        raise AscAIError(f"ASC-AI produced no {media_type} output")
+    path = str(outputs[0].get("path") or "")
+    if not path:
+        raise AscAIError(f"ASC-AI {media_type} output has no path")
+    if not Path(path).is_file():
+        raise AscAIError(
+            f"ASC-AI output is not visible to MoneyPrinterTurbo: {path}. "
+            "Mount /srv/ai-data into the MoneyPrinterTurbo container."
+        )
+    return path
+
+
+def generate_image(task_id: str, scene: dict, aspect: Any) -> str:
+    width, height = _dimensions(aspect)
+    prompt = str(scene.get("visual_prompt") or "").strip()
+    if not prompt:
+        raise AscAIError("Director scene has no visual prompt")
+    scene_id = str(scene.get("scene_id") or "scene")
+    payload = {
+        "workflow_id": str(
+            _setting("image_workflow_id", "lustify_krea_v10_native_int8.v1")
+        ),
+        "model_id": str(
+            _setting("image_model_id", "mdl_diffusion_model_0505412ed2ac")
+        ),
+        "prompt": prompt,
+        "original_user_prompt": prompt,
+        "prompt_compiler_id": "RAW",
+        "prompt_compiler_version": "mpt-director-v1",
+        "negative_prompt": str(
+            _setting(
+                "image_negative_prompt",
+                "text, watermark, logo, duplicate subjects, distorted anatomy, low quality",
+            )
+        ),
+        "overrides": {
+            "width": width,
+            "height": height,
+            "steps": int(_setting("image_steps", 8)),
+            "cfg": float(_setting("image_cfg", 1.0)),
+            "batch": 1,
+        },
+        "priority": int(_setting("priority", 120)),
+        "idempotency_key": f"mpt-{task_id}-{scene_id}-image"[:200],
+        "loras": [],
+        "experimental_resources_opt_in": False,
+        "experimental_model_opt_in": False,
+    }
+    result = _request_json(
+        "POST",
+        _image_url() + "/api/v1/images/generate",
+        json=payload,
+        timeout=(5, float(_setting("generation_timeout_seconds", 1800))),
+    )
+    return _output_path(result, "image")
+
+
+def _safe_token(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]+", "-", value).strip("-")[:80] or "item"
+
+
+def stage_image_for_video(task_id: str, scene_id: str, image_path: str) -> str:
+    input_root = Path(str(_setting("input_root", "/srv/ai-data/input"))).resolve()
+    source = Path(image_path).resolve()
+    if not source.is_file():
+        raise AscAIError("generated source image is missing")
+    suffix = source.suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise AscAIError("generated source image has an unsupported extension")
+    relative = Path("moneyprinterturbo") / _safe_token(task_id) / (
+        _safe_token(scene_id) + suffix
+    )
+    target = (input_root / relative).resolve()
+    try:
+        target.relative_to(input_root)
+    except ValueError as exc:
+        raise AscAIError("unsafe ASC-AI input path") from exc
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        try:
+            os.link(source, target)
+        except OSError:
+            shutil.copy2(source, target)
+    return relative.as_posix()
+
+
+def generate_video_from_image(task_id: str, scene: dict, image_path: str) -> str:
+    scene_id = str(scene.get("scene_id") or "scene")
+    input_name = stage_image_for_video(task_id, scene_id, image_path)
+    prompt = str(scene.get("motion_prompt") or "").strip()
+    if not prompt:
+        prompt = (
+            "subtle coherent natural motion, stable composition, no identity drift"
+        )
+    visual = str(scene.get("visual_prompt") or "").strip()
+    combined_prompt = f"{visual}. Motion: {prompt}" if visual else prompt
+    duration = int(_setting("video_duration_seconds", 5))
+    if duration not in {3, 5}:
+        duration = 5
+    payload = {
+        "workflow_id": str(_setting("video_workflow_id", "wan22_ti2v_5b.v1")),
+        "model_id": str(
+            _setting("video_model_id", "mdl_diffusion_model_456f901338bd")
+        ),
+        "prompt": combined_prompt,
+        "negative_prompt": str(
+            _setting(
+                "video_negative_prompt",
+                "identity drift, subject fusion, flicker, warped anatomy, text, watermark",
+            )
+        ),
+        "input_name": input_name,
+        "profile": str(_setting("video_profile", "STANDARD")),
+        "duration_seconds": duration,
+        "frames": int(_setting("video_frames", 81)),
+        "continuation_mode": "new",
+        "segment_index": 1,
+        "priority": int(_setting("priority", 120)),
+        "idempotency_key": f"mpt-{task_id}-{scene_id}-video"[:200],
+        "loras": [],
+        "experimental_opt_in": False,
+    }
+    result = _request_json(
+        "POST",
+        _image_url() + "/api/v1/videos/generate",
+        json=payload,
+        timeout=(5, float(_setting("generation_timeout_seconds", 1800))),
+    )
+    return _output_path(result, "video")
+
+
+def generate_scene_materials(
+    task_id: str,
+    plan: dict,
+    audio_duration: float,
+    aspect: Any,
+    clip_duration: int,
+) -> list[str]:
+    scenes = list(plan.get("scenes") or [])
+    if not scenes:
+        raise AscAIError("Director plan has no scenes")
+    paths: list[str] = []
+    covered = 0.0
+    required = max(float(audio_duration or 0), 0.1)
+    clip_seconds = max(1, int(clip_duration or 5))
+    for scene in scenes:
+        image_path = generate_image(task_id, scene, aspect)
+        output_path = ""
+        if scene.get("visual_strategy") == "LOCAL_VIDEO":
+            try:
+                output_path = generate_video_from_image(
+                    task_id, scene, image_path
+                )
+            except Exception as exc:
+                if not bool(_setting("video_fallback_to_image", True)):
+                    raise
+                logger.warning(
+                    "ASC-AI local video failed; falling back to generated still: "
+                    f"scene={scene.get('scene_id')}, error={type(exc).__name__}"
+                )
+        if not output_path:
+            output_path = video.render_image_zoom_video(
+                image_path, clip_seconds
+            )
+        if not output_path:
+            raise AscAIError(
+                f"failed to render ASC-AI scene "
+                f"{scene.get('scene_id') or '<unknown>'}"
+            )
+        paths.append(output_path)
+        covered += clip_seconds
+        if covered >= required:
+            break
+
+    if not paths:
+        raise AscAIError("ASC-AI Director produced no usable visual materials")
+    return paths
