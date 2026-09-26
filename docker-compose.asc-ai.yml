@@ -1,0 +1,26 @@
+# ASC-AI integration override.
+# Run:
+#   docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml up -d --build
+#
+# MoneyPrinterTurbo itself stays CPU-only. GPU neural work goes through ASC-AI.
+x-asc-ai-env: &asc-ai-env
+  ASC_AI_PROMPT_URL: http://host.docker.internal:8094
+  ASC_AI_IMAGE_ADAPTER_URL: http://host.docker.internal:8091
+  MPT_CHATTERBOX_BASE_URL: http://host.docker.internal:4123/v1
+
+x-asc-ai-host: &asc-ai-host
+  - "host.docker.internal:host-gateway"
+
+x-asc-ai-volumes: &asc-ai-volumes
+  - /srv/ai-data:/srv/ai-data
+
+services:
+  webui:
+    environment: *asc-ai-env
+    extra_hosts: *asc-ai-host
+    volumes: *asc-ai-volumes
+
+  api:
+    environment: *asc-ai-env
+    extra_hosts: *asc-ai-host
+    volumes: *asc-ai-volumes
