@@ -33,6 +33,8 @@ ENGLISH_FALLBACK_KEYS = frozenset(
         "Director Visual Style",
         "Director Audience",
         "Director Purpose",
+        "Director Public Research",
+        "Director Public Research Help",
         "Check ASC-AI",
         "ASC-AI Ready",
         "ASC-AI Unavailable",
