@@ -595,16 +595,20 @@ def generate_scene_materials(
         },
         "workflow_snapshot": {
             "image": _image_binding(),
-            "video": _video_binding()
-            if any(
-                row.get("visual_strategy") == "LOCAL_VIDEO" for row in scenes
-            )
-            else None,
+            "video": None,
         },
         "scenes": [],
         "outputs": [],
         "status": "running",
     }
+    if any(row.get("visual_strategy") == "LOCAL_VIDEO" for row in scenes):
+        try:
+            manifest["workflow_snapshot"]["video"] = _video_binding()
+        except AscAIError as exc:
+            manifest["workflow_snapshot"]["video"] = {
+                "available": False,
+                "error": str(exc),
+            }
     persist_production_manifest(task_id, manifest)
 
     try:
