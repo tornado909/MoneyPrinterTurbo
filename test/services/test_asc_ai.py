@@ -241,6 +241,37 @@ class TestAscAIIntegration(unittest.TestCase):
 
     @patch("app.services.asc_ai._output_path", return_value="/tmp/generated.png")
     @patch("app.services.asc_ai._request_json", return_value={"outputs": [{"path": "/tmp/generated.png"}]})
+    @patch("app.services.asc_ai._request_json")
+    @patch("app.services.asc_ai.stage_image_for_video", return_value="scene.png")
+    def test_wan_generation_uses_normalized_scene_duration(
+        self, _stage, request_json
+    ):
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as output:
+            request_json.return_value = {
+                "outputs": [{"path": output.name}],
+                "settings": {"duration_seconds": 5},
+            }
+            binding = {
+                "workflow_id": "wan_i2v_default.v1",
+                "model_id": "video-model",
+                "defaults": {"length": 89},
+            }
+            result = asc_ai.generate_video_from_image(
+                "task",
+                {
+                    "scene_id": "scene_01",
+                    "duration_seconds": 5,
+                    "visual_prompt": "greenhouse",
+                    "motion_prompt": "slow push in",
+                },
+                "/tmp/source.png",
+                binding=binding,
+            )
+
+        self.assertTrue(result.endswith(".mp4"))
+        payload = request_json.call_args.kwargs["json"]
+        self.assertEqual(payload["duration_seconds"], 5)
+
     @patch("app.services.asc_ai._workflow_catalog")
     def test_character_identity_request_uses_references_lora_and_portrait_resolution(
         self, catalog, request_json, _output
@@ -492,6 +523,8 @@ class TestAscAIIntegration(unittest.TestCase):
             [row["visual_strategy"] for row in result["scenes"]],
             ["LOCAL_VIDEO", "LOCAL_IMAGE"],
         )
+        self.assertEqual(result["scenes"][0]["duration_seconds"], 5)
+        self.assertEqual(result["scenes"][1]["duration_seconds"], 5)
 
     @patch("app.services.asc_ai_qc.quality_control")
     def test_quality_control_uses_canonical_qc_module(self, qc):
