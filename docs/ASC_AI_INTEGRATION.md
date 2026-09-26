@@ -1,60 +1,77 @@
 # Интеграция MoneyPrinterTurbo RU с ASC-AI
 
-Этот форк использует ASC-AI как локальный AI control plane, а MoneyPrinterTurbo — как production/editor слой.
+MoneyPrinterTurbo используется как production/editor слой, а ASC-AI — как локальный AI control plane. Платные AI API в production-пути не требуются.
 
-## Архитектура
+## Production pipeline
 
 1. Пользователь вводит тему или готовый сценарий.
-2. MoneyPrinterTurbo вызывает ASC-AI Prompt Intelligence: POST /api/v1/prompt-intelligence/director/plan.
-3. Director использует только локальный Qwen через ManagedInference; GPU admission выдаёт GPU Scheduler.
-4. Director возвращает сценарий и план сцен. Большинство сцен — LOCAL_IMAGE, ограниченное число важных сцен — LOCAL_VIDEO.
-5. MoneyPrinterTurbo вызывает Image Adapter, а не ComfyUI напрямую.
-6. Image Adapter получает Scheduler lease и создаёт изображение.
-7. Для LOCAL_VIDEO исходное изображение помещается в /srv/ai-data/input, после чего Image Adapter запускает локальный Wan I2V.
-8. MoneyPrinterTurbo собирает сцены MoviePy/FFmpeg, делает локальную озвучку и Whisper-субтитры.
+2. **Director** создаёт сценарий и scene plan локальным `Qwen3-8B-Q4_K_M`.
+3. Перед обращением к `prompt-llm-local` Director создаёт job/stage и получает **GPU Scheduler lease** (`:8090`). Прямой неучтённый GPU-доступ не используется.
+4. Director ограничивает число дорогих `LOCAL_VIDEO` сцен; остальные сцены идут через `LOCAL_IMAGE`.
+5. Изображения генерируются только через **Image Adapter** (`:8091`), который сам работает с Scheduler и ComfyUI.
+6. Для динамических сцен Image Adapter запускает локальный Wan I2V. MoneyPrinterTurbo не обращается к ComfyUI напрямую.
+7. Каждый полученный материал регистрируется в **Prompt Intelligence artifact registry** (`:8094`) и проходит локальный **Visual Analyzer** (`:8095`) через канонический `/api/v1/evidence/analyze`.
+8. QC использует sealed `technical_assessment`. Visual Analyzer намеренно не выдаёт выдуманный prompt-similarity score.
+9. Не прошедшее технический QC изображение может быть один раз локально перегенерировано; неудачный I2V может откатиться на исходное изображение.
+10. MoneyPrinterTurbo собирает ролик MoviePy/FFmpeg, делает локальную озвучку и локальные Whisper-субтитры.
 
 ## Local-only policy
 
-При asc_ai.local_only = true запрещены облачные/платные LLM, облачные TTS, облачная генерация изображений/видео, удалённая AI-музыка и автоматический Upload-Post.
+При `asc_ai.local_only = true` production-путь работает fail-closed:
 
-Разрешены ASC-AI Director, ASC-AI Image Adapter, локальные материалы, self-hosted Chatterbox Multilingual, local faster-whisper и локальная музыка.
+- запрещены облачные/платные LLM;
+- запрещены облачные TTS;
+- запрещены облачные генераторы изображений и видео;
+- запрещены удалённые AI-music providers;
+- запрещён автоматический Upload-Post;
+- если Director выключен, для запуска без облачного LLM необходимо передать готовый сценарий.
 
-## Русская озвучка
+Разрешены GPU Scheduler, локальный Qwen3-8B Director, Prompt Intelligence, Image Adapter, Krea/Lustify, Wan, Visual Analyzer/Qwen3-VL, self-hosted Chatterbox, local faster-whisper и локальные пользовательские материалы.
 
-Используйте Chatterbox TTS API в self-hosted multilingual режиме с DEVICE=cpu.
-MoneyPrinterTurbo ожидает OpenAI-compatible endpoint http://127.0.0.1:4123/v1.
-В Docker override адрес автоматически меняется на host.docker.internal:4123/v1.
+## Director и Prompt Intelligence
 
-## Запуск
+В ASC-AI нет публичного `/director/plan`. Director принадлежит MoneyPrinterTurbo как orchestration layer. Для текстового планирования он использует тот же scheduler-managed `prompt-llm-local`, что и ASC-AI ManagedInference. Prompt Intelligence остаётся каноническим registry/knowledge/artifact layer.
+
+## ASC-AI endpoints
+
+- GPU Scheduler: `http://127.0.0.1:8090`
+- Prompt local LLM: `http://127.0.0.1:8080`
+- Image Adapter: `http://127.0.0.1:8091`
+- Prompt Intelligence: `http://127.0.0.1:8094`
+- Visual Analyzer: `http://127.0.0.1:8095`
+
+В Docker overlay используются внутренние имена: `gpu-scheduler:8090`, `prompt-llm-local:8080`, `image-adapter:8091`, `prompt-intelligence:8094`, `visual-analyzer:8095`, `chatterbox-tts:4123`.
+
+## Запуск на ASC-AI
 
     git clone https://github.com/tornado909/MoneyPrinterTurbo.git
     cd MoneyPrinterTurbo
     cp config.example.toml config.toml
     docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml up -d --build
 
-Сначала в ASC-AI поднимите CPU-only TTS overlay:
+Контейнеры MoneyPrinterTurbo присоединяются к external network `asc-ai-stack_default` и монтируют `/srv/ai-data` для обмена артефактами. Сам MoneyPrinterTurbo GPU не получает.
 
-    cd /opt/ai-stack
-    sudo -n mkdir -p /srv/ai/cache/chatterbox /srv/ai-data/chatterbox/voices
-    docker compose -f compose.yaml -f compose.chatterbox.yaml build chatterbox-tts
-    docker compose -f compose.yaml -f compose.chatterbox.yaml up -d --no-deps chatterbox-tts
+WebUI: `http://127.0.0.1:8501`
 
-Затем запустите MoneyPrinterTurbo. Его контейнеры присоединяются к external network `asc-ai-stack_default` и обращаются к `prompt-intelligence:8094`, `image-adapter:8091` и `chatterbox-tts:4123` напрямую.
+API: `http://127.0.0.1:8080/docs`
 
-WebUI: http://127.0.0.1:8501
-API: http://127.0.0.1:8080/docs
+## Preflight
 
-MoneyPrinterTurbo контейнер не получает GPU. /srv/ai-data монтируется для обмена локальными артефактами с ASC-AI.
+    curl http://127.0.0.1:8090/health
+    curl http://127.0.0.1:8080/health
+    curl http://127.0.0.1:8091/health
+    curl http://127.0.0.1:8094/health
+    curl http://127.0.0.1:8095/health
 
-## Проверка
+Director дополнительно использует Scheduler API `/api/v1/jobs`, `/api/v1/stages/*` и `/api/v1/leases/*`.
 
-- GET http://127.0.0.1:8094/health
-- GET http://127.0.0.1:8094/api/v1/prompt-intelligence/director/capabilities
-- GET http://127.0.0.1:8091/health
-- Chatterbox: http://127.0.0.1:4123
+## Экономия GPU
 
-Если Director сообщает not_configured, в ASC-AI должен быть включён PROMPT_LOCAL_ENABLED=true и настроен PROMPT_LOCAL_LLM_URL.
+- сценарий + scene plan: один локальный Qwen3-8B inference;
+- большинство сцен: Krea/Lustify image;
+- image → лёгкий zoom/pan в MoneyPrinterTurbo;
+- только выбранные Director сцены: Wan I2V;
+- Qwen3-VL используется только для bounded QC;
+- локальные LLM/VLM освобождают VRAM после inference согласно ASC-AI scheduler policy.
 
-## Производственная стратегия
-
-Director экономит GPU: обычная сцена — локальная Krea/Lustify картинка с лёгким zoom/pan; важная динамическая сцена — локальный Wan I2V. Количество I2V-сцен ограничено. Если I2V не удался, готовое изображение используется как fallback.
+Такой режим значительно дешевле по вычислениям, чем генерация всего ролика через I2V, но оставляет Director возможность выделять действительно важные динамические сцены.
