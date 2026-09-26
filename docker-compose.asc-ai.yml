@@ -8,6 +8,8 @@ x-asc-ai-env: &asc-ai-env
   ASC_AI_PROMPT_URL: http://prompt-intelligence:8094
   ASC_AI_IMAGE_ADAPTER_URL: http://image-adapter:8091
   ASC_AI_VISUAL_ANALYZER_URL: http://visual-analyzer:8095
+  ASC_AI_SCHEDULER_URL: http://gpu-scheduler:8090
+  ASC_AI_PROMPT_LLM_URL: http://prompt-llm-local:8080
   MPT_CHATTERBOX_BASE_URL: http://chatterbox-tts:4123/v1
 
 x-asc-ai-volumes: &asc-ai-volumes
