@@ -836,6 +836,38 @@ class TestTaskService(unittest.TestCase):
         self.assertEqual(failed_task["failed_stage"], "audio")
         self.assertIn("does not exist", failed_task["error"])
 
+    def test_generate_audio_uses_wav_for_chatterbox(self):
+        task_id = "test-chatterbox-wav"
+        task_dir = utils.task_dir(task_id)
+        params = VideoParams(
+            video_subject="tts audio",
+            video_script="",
+            voice_name="chatterbox:ru-default",
+        )
+        sub_maker = MagicMock()
+        try:
+            with (
+                patch.object(tm.voice, "tts", return_value=sub_maker) as tts,
+                patch.object(tm.voice, "get_audio_duration", return_value=4.2),
+            ):
+                audio_file, audio_duration, result_sub_maker = tm.generate_audio(
+                    task_id, params, "Русский текст"
+                )
+        finally:
+            shutil.rmtree(task_dir, ignore_errors=True)
+
+        self.assertTrue(audio_file.endswith("audio.wav"))
+        self.assertEqual(audio_duration, 5)
+        self.assertIs(result_sub_maker, sub_maker)
+        self.assertEqual(
+            tts.call_args.kwargs["voice_file"],
+            os.path.join(task_dir, "audio.wav"),
+        )
+        self.assertEqual(
+            tts.call_args.kwargs["voice_name"],
+            "chatterbox:ru-default",
+        )
+
     def test_generate_audio_prefers_file_duration_over_sub_maker(self):
         # Every fixture deliberately makes the file duration and the SubMaker
         # duration ceil to DIFFERENT integers. If someone "simplifies" them to
