@@ -36,12 +36,12 @@ class TestLocalResearch(unittest.TestCase):
             "досветка теплицы",
             language="ru-RU",
             max_pages=2,
-            max_chars_per_page=120,
+            max_chars_per_page=240,
             timeout=4,
         )
 
-        self.assertEqual(len(rows), 3)
-        self.assertLessEqual(len(rows[0]["extract"]), 120)
+        self.assertEqual(len(rows), 2)
+        self.assertLessEqual(len(rows[0]["extract"]), 240)
         self.assertNotIn("<b>", rows[0]["extract"])
         self.assertEqual(
             rows[0]["source_url"], "https://ru.wikipedia.org/?curid=10"
