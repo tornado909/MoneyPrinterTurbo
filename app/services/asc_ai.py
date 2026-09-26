@@ -889,6 +889,31 @@ def stage_for_qc(
     return relative.as_posix()
 
 
+def _image_vlm_required(
+    scene_index: int,
+    attempt: int,
+    scene: dict,
+) -> bool:
+    policy = str(_setting("qc_image_policy", "adaptive") or "adaptive").lower()
+    if policy not in {"full", "adaptive", "structural"}:
+        policy = "full"
+    if policy == "full":
+        return True
+    if policy == "structural":
+        return False
+
+    stride = max(1, int(_setting("qc_image_vlm_stride", 3)))
+    has_identity = bool(
+        (scene.get("character_identity") or {}).get("character_id")
+    )
+    return (
+        scene_index == 0
+        or scene_index % stride == 0
+        or has_identity
+        or attempt > 0
+    )
+
+
 def quality_control(
     task_id: str,
     scene: dict,
@@ -1044,26 +1069,10 @@ def generate_scene_materials(
                     image_path, image_execution = image_result
                 else:
                     image_path, image_execution = image_result, None
-                qc_policy = str(
-                    _setting("qc_image_policy", "adaptive") or "adaptive"
-                ).lower()
-                qc_stride = max(1, int(_setting("qc_image_vlm_stride", 3)))
-                has_identity = bool(
-                    (working_scene.get("character_identity") or {}).get(
-                        "character_id"
-                    )
-                )
-                run_image_vlm = (
-                    qc_policy == "full"
-                    or (
-                        qc_policy == "adaptive"
-                        and (
-                            scene_index == 0
-                            or scene_index % qc_stride == 0
-                            or has_identity
-                            or attempt > 0
-                        )
-                    )
+                run_image_vlm = _image_vlm_required(
+                    scene_index,
+                    attempt,
+                    working_scene,
                 )
                 image_qc = quality_control(
                     task_id,
