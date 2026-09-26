@@ -70,6 +70,69 @@ def _request_json(
     return payload
 
 
+def _workflow_catalog() -> list[dict]:
+    try:
+        response = requests.get(
+            _image_url() + "/api/v1/image-workflows", timeout=(3, 20)
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        raise AscAIError(
+            f"ASC-AI workflow catalog request failed: {type(exc).__name__}"
+        ) from exc
+    except ValueError as exc:
+        raise AscAIError("ASC-AI workflow catalog returned invalid JSON") from exc
+    if not isinstance(payload, list):
+        raise AscAIError("ASC-AI workflow catalog returned a non-list response")
+    return [row for row in payload if isinstance(row, dict)]
+
+
+def _workflow_score(row: dict, *, purpose: str) -> tuple[int, int]:
+    state = str(row.get("validation_state") or "").lower()
+    preferred = any(
+        marker in state
+        for marker in ("preferred", "production", "user_approved", "validated")
+    )
+    risky = any(
+        marker in state
+        for marker in ("experimental", "candidate", "canary", "shadow")
+    )
+    return (2 if preferred else 1, 0 if risky else 1)
+
+
+def _resolve_workflow(
+    *,
+    preferred_id: str,
+    purpose: str,
+    fallback_ids: tuple[str, ...] = (),
+) -> dict:
+    rows = [
+        row
+        for row in _workflow_catalog()
+        if row.get("purpose") == purpose and not row.get("operator_only")
+    ]
+    if not rows:
+        raise AscAIError(f"ASC-AI has no usable {purpose} workflow")
+
+    by_id = {str(row.get("workflow_id") or ""): row for row in rows}
+    for workflow_id in (preferred_id, *fallback_ids):
+        if workflow_id and workflow_id in by_id:
+            return by_id[workflow_id]
+
+    return max(rows, key=lambda row: _workflow_score(row, purpose=purpose))
+
+
+def _workflow_resolution(row: dict) -> tuple[int, int]:
+    value = str(row.get("default_resolution") or "")
+    match = re.fullmatch(r"(\d+)x(\d+)", value)
+    if not match:
+        raise AscAIError(
+            f"ASC-AI workflow {row.get('workflow_id')} has invalid default resolution"
+        )
+    return int(match.group(1)), int(match.group(2))
+
+
 def health() -> dict:
     return {
         "director": _request_json(
@@ -90,6 +153,10 @@ def validate_local_only(params) -> None:
         raise AscAIError(
             "local-only mode allows only ASC-AI or user-provided local visual materials"
         )
+    if params.video_source == "asc_ai" and not getattr(
+        params, "director_enabled", False
+    ):
+        raise AscAIError("ASC-AI visual source requires Director planning")
     voice_mode = str(config.ui.get("voice_mode", "tts") or "tts")
     tts_server = str(config.ui.get("tts_server", "chatterbox") or "chatterbox")
     if voice_mode == "tts" and tts_server not in _LOCAL_TTS_SERVERS:
@@ -112,13 +179,16 @@ def create_director_plan(params) -> dict:
         raise AscAIError("ASC-AI integration is disabled")
     aspect = getattr(params.video_aspect, "value", params.video_aspect) or "9:16"
     target_duration = int(
-        getattr(params, "director_target_duration_seconds", 0)
-        or _setting("director_target_duration_seconds", 45)
+        _setting(
+            "director_target_duration_seconds",
+            getattr(params, "director_target_duration_seconds", 45),
+        )
     )
     max_video_scenes = int(
-        getattr(params, "director_max_local_video_scenes", 0)
-        if getattr(params, "director_max_local_video_scenes", None) is not None
-        else _setting("director_max_local_video_scenes", 1)
+        _setting(
+            "director_max_local_video_scenes",
+            getattr(params, "director_max_local_video_scenes", 1),
+        )
     )
     payload = {
         "topic": params.video_subject,
@@ -171,18 +241,21 @@ def director_terms(plan: dict) -> list[str]:
     return result
 
 
-def _dimensions(aspect: Any) -> tuple[int, int]:
-    value = str(getattr(aspect, "value", aspect) or "9:16")
-    if value == "16:9":
-        return int(_setting("image_landscape_width", 1536)), int(
-            _setting("image_landscape_height", 1152)
-        )
-    if value == "1:1":
-        return int(_setting("image_square_width", 1344)), int(
-            _setting("image_square_height", 1344)
-        )
-    return int(_setting("image_portrait_width", 1152)), int(
-        _setting("image_portrait_height", 1536)
+def _image_binding() -> dict:
+    return _resolve_workflow(
+        preferred_id=str(
+            _setting("image_workflow_id", "lustify_krea_v10_native_int8.v1")
+        ),
+        purpose="text_to_image",
+        fallback_ids=("lustify_krea_v10_native_int8.v1", "krea_txt2img.v1"),
+    )
+
+
+def _video_binding() -> dict:
+    return _resolve_workflow(
+        preferred_id=str(_setting("video_workflow_id", "wan_i2v_default.v1")),
+        purpose="image_to_video",
+        fallback_ids=("wan_i2v_default.v1", "wan22_ti2v_5b.v1"),
     )
 
 
@@ -202,18 +275,15 @@ def _output_path(result: dict, media_type: str) -> str:
 
 
 def generate_image(task_id: str, scene: dict, aspect: Any) -> str:
-    width, height = _dimensions(aspect)
+    binding = _image_binding()
+    width, height = _workflow_resolution(binding)
     prompt = str(scene.get("visual_prompt") or "").strip()
     if not prompt:
         raise AscAIError("Director scene has no visual prompt")
     scene_id = str(scene.get("scene_id") or "scene")
     payload = {
-        "workflow_id": str(
-            _setting("image_workflow_id", "lustify_krea_v10_native_int8.v1")
-        ),
-        "model_id": str(
-            _setting("image_model_id", "mdl_diffusion_model_0505412ed2ac")
-        ),
+        "workflow_id": str(binding["workflow_id"]),
+        "model_id": str(binding["model_id"]),
         "prompt": prompt,
         "original_user_prompt": prompt,
         "prompt_compiler_id": "RAW",
@@ -276,6 +346,7 @@ def stage_image_for_video(task_id: str, scene_id: str, image_path: str) -> str:
 
 
 def generate_video_from_image(task_id: str, scene: dict, image_path: str) -> str:
+    binding = _video_binding()
     scene_id = str(scene.get("scene_id") or "scene")
     input_name = stage_image_for_video(task_id, scene_id, image_path)
     prompt = str(scene.get("motion_prompt") or "").strip()
@@ -289,10 +360,8 @@ def generate_video_from_image(task_id: str, scene: dict, image_path: str) -> str
     if duration not in {3, 5}:
         duration = 5
     payload = {
-        "workflow_id": str(_setting("video_workflow_id", "wan22_ti2v_5b.v1")),
-        "model_id": str(
-            _setting("video_model_id", "mdl_diffusion_model_456f901338bd")
-        ),
+        "workflow_id": str(binding["workflow_id"]),
+        "model_id": str(binding["model_id"]),
         "prompt": combined_prompt,
         "negative_prompt": str(
             _setting(
@@ -303,7 +372,11 @@ def generate_video_from_image(task_id: str, scene: dict, image_path: str) -> str
         "input_name": input_name,
         "profile": str(_setting("video_profile", "STANDARD")),
         "duration_seconds": duration,
-        "frames": int(_setting("video_frames", 81)),
+        "frames": int(
+            (binding.get("defaults") or {}).get(
+                "length", _setting("video_frames", 89)
+            )
+        ),
         "continuation_mode": "new",
         "segment_index": 1,
         "priority": int(_setting("priority", 120)),
