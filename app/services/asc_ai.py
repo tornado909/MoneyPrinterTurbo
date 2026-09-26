@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -509,6 +510,44 @@ def _video_binding() -> dict:
     )
 
 
+def _target_aspect_ratio(aspect: Any) -> float | None:
+    value = str(getattr(aspect, "value", aspect) or "").strip()
+    match = re.fullmatch(r"(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)", value)
+    if not match:
+        return None
+    denominator = float(match.group(2))
+    if denominator <= 0:
+        return None
+    return float(match.group(1)) / denominator
+
+
+def _video_compatibility(aspect: Any) -> dict:
+    binding = _video_binding()
+    width, height = _workflow_resolution(binding, aspect)
+    target = _target_aspect_ratio(aspect)
+    actual = width / height
+    log_error = (
+        abs(math.log(actual / target))
+        if target and actual > 0
+        else 0.0
+    )
+    max_error = max(
+        0.01,
+        float(_setting("video_max_aspect_log_error", 0.18)),
+    )
+    return {
+        "available": True,
+        "compatible": log_error <= max_error,
+        "workflow_id": binding.get("workflow_id"),
+        "model_id": binding.get("model_id"),
+        "resolution": f"{width}x{height}",
+        "target_aspect": str(getattr(aspect, "value", aspect) or ""),
+        "aspect_log_error": round(log_error, 4),
+        "max_aspect_log_error": max_error,
+        "binding": binding,
+    }
+
+
 def _output_path(result: dict, media_type: str) -> str:
     outputs = result.get("outputs") or []
     if not outputs or not isinstance(outputs[0], dict):
@@ -665,8 +704,14 @@ def stage_image_for_video(task_id: str, scene_id: str, image_path: str) -> str:
     return relative.as_posix()
 
 
-def generate_video_from_image(task_id: str, scene: dict, image_path: str) -> str:
-    binding = _video_binding()
+def generate_video_from_image(
+    task_id: str,
+    scene: dict,
+    image_path: str,
+    *,
+    binding: dict | None = None,
+) -> str:
+    binding = binding or _video_binding()
     scene_id = str(scene.get("scene_id") or "scene")
     input_name = stage_image_for_video(task_id, scene_id, image_path)
     prompt = str(scene.get("motion_prompt") or "").strip()
