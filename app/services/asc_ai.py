@@ -569,8 +569,9 @@ def generate_image(
     aspect: Any,
     *,
     attempt: int = 1,
+    binding: dict | None = None,
 ) -> str:
-    binding = _image_binding(scene)
+    binding = binding or _image_binding(scene)
     width, height = _workflow_resolution(binding, aspect)
     prompt = str(scene.get("visual_prompt") or "").strip()
     if not prompt:
@@ -871,12 +872,19 @@ def generate_scene_materials(
         "outputs": [],
         "status": "running",
     }
+    video_capability = None
     if any(row.get("visual_strategy") == "LOCAL_VIDEO" for row in scenes):
         try:
-            manifest["workflow_snapshot"]["video"] = _video_binding()
+            video_capability = _video_compatibility(aspect)
+            manifest["workflow_snapshot"]["video"] = {
+                key: value
+                for key, value in video_capability.items()
+                if key != "binding"
+            }
         except AscAIError as exc:
             manifest["workflow_snapshot"]["video"] = {
                 "available": False,
+                "compatible": False,
                 "error": str(exc),
             }
     persist_production_manifest(task_id, manifest)
@@ -930,6 +938,7 @@ def generate_scene_materials(
                     working_scene,
                     aspect,
                     attempt=attempt + 1,
+                    binding=scene_binding,
                 )
                 image_qc = quality_control(
                     task_id, working_scene, image_path, media_kind="image"
@@ -972,56 +981,100 @@ def generate_scene_materials(
                     f"scene={scene.get('scene_id')}"
                 )
 
+            requested_scene_seconds = max(
+                2,
+                min(
+                    15,
+                    int(scene.get("duration_seconds") or clip_seconds),
+                ),
+            )
+            effective_scene_seconds = requested_scene_seconds
             output_path = ""
             if scene.get("visual_strategy") == "LOCAL_VIDEO":
                 video_record = {
                     "candidate_path": None,
                     "qc": None,
                     "error": None,
+                    "capability": (
+                        {
+                            key: value
+                            for key, value in video_capability.items()
+                            if key != "binding"
+                        }
+                        if video_capability
+                        else None
+                    ),
                 }
                 scene_record["video"] = video_record
-                try:
-                    candidate_video = generate_video_from_image(
-                        task_id, working_scene, image_path
+
+                if not video_capability or not video_capability.get("compatible"):
+                    scene_record["fallback"] = "video_aspect_unsupported"
+                    message = (
+                        "ASC-AI production video workflow does not support "
+                        f"target aspect {getattr(aspect, 'value', aspect)}; "
+                        "using the approved still without starting a Wan GPU job"
                     )
-                    video_record["candidate_path"] = candidate_video
-                    video_qc = quality_control(
-                        task_id,
-                        working_scene,
-                        candidate_video,
-                        media_kind="video",
-                    )
-                    video_record["qc"] = video_qc
-                    if video_qc.get("passed"):
-                        output_path = candidate_video
-                    else:
-                        scene_record["fallback"] = "video_qc_failed"
-                        logger.warning(
-                            "ASC-AI local video failed production QC; using "
-                            "the already-approved still instead: "
-                            f"scene={scene.get('scene_id')}, "
-                            f"technical={video_qc.get('technical_score')}"
-                        )
-                except Exception as exc:
-                    video_record["error"] = (
-                        f"{type(exc).__name__}: {str(exc)[:500]}"
-                    )
+                    video_record["error"] = message
                     if not bool(_setting("video_fallback_to_image", True)):
-                        raise
-                    scene_record["fallback"] = "video_generation_failed"
-                    logger.warning(
-                        "ASC-AI local video failed; falling back to "
-                        "generated still: "
-                        f"scene={scene.get('scene_id')}, "
-                        f"error={type(exc).__name__}"
+                        raise AscAIError(message)
+                    logger.info(
+                        f"{message}: scene={scene.get('scene_id')}"
                     )
+                else:
+                    try:
+                        candidate_video = generate_video_from_image(
+                            task_id,
+                            working_scene,
+                            image_path,
+                            binding=video_capability["binding"],
+                        )
+                        video_record["candidate_path"] = candidate_video
+                        video_qc = quality_control(
+                            task_id,
+                            working_scene,
+                            candidate_video,
+                            media_kind="video",
+                        )
+                        video_record["qc"] = video_qc
+                        if video_qc.get("passed"):
+                            output_path = candidate_video
+                            effective_scene_seconds = int(
+                                _setting("video_duration_seconds", 5)
+                            )
+                            if effective_scene_seconds not in {3, 5}:
+                                effective_scene_seconds = 5
+                        else:
+                            scene_record["fallback"] = "video_qc_failed"
+                            logger.warning(
+                                "ASC-AI local video failed production QC; using "
+                                "the already-approved still instead: "
+                                f"scene={scene.get('scene_id')}, "
+                                f"technical={video_qc.get('technical_score')}"
+                            )
+                    except Exception as exc:
+                        video_record["error"] = (
+                            f"{type(exc).__name__}: {str(exc)[:500]}"
+                        )
+                        if not bool(_setting("video_fallback_to_image", True)):
+                            raise
+                        scene_record["fallback"] = "video_generation_failed"
+                        logger.warning(
+                            "ASC-AI local video failed; falling back to "
+                            "generated still: "
+                            f"scene={scene.get('scene_id')}, "
+                            f"error={type(exc).__name__}"
+                        )
                 persist_production_manifest(task_id, manifest)
 
             if not output_path:
                 output_path = video.render_image_zoom_video(
-                    image_path, clip_seconds
+                    image_path, requested_scene_seconds
                 )
-                if scene.get("visual_strategy") == "LOCAL_VIDEO" and not scene_record["fallback"]:
+                effective_scene_seconds = requested_scene_seconds
+                if (
+                    scene.get("visual_strategy") == "LOCAL_VIDEO"
+                    and not scene_record["fallback"]
+                ):
                     scene_record["fallback"] = "video_not_selected"
             if not output_path:
                 raise AscAIError(
@@ -1030,9 +1083,10 @@ def generate_scene_materials(
                 )
 
             scene_record["final_output"] = output_path
+            scene_record["effective_duration_seconds"] = effective_scene_seconds
             paths.append(output_path)
             manifest["outputs"] = list(paths)
-            covered += clip_seconds
+            covered += effective_scene_seconds
             persist_production_manifest(task_id, manifest)
             if covered >= required:
                 break
