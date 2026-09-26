@@ -334,6 +334,93 @@ class TestAscAIIntegration(unittest.TestCase):
             else:
                 config.asc_ai["qc_image_vlm_stride"] = old_stride
 
+    @patch("app.services.asc_ai_director.SchedulerManagedLocalLLM")
+    @patch("app.services.asc_ai_director.local_research.wikipedia_research")
+    def test_director_repairs_invalid_first_plan_with_schema_error(
+        self, research, runtime_cls
+    ):
+        research.return_value = []
+        runtime = runtime_cls.return_value
+        runtime.chat.side_effect = [
+            (
+                '{"script":"Текст","scenes":[{"scene_id":"scene_01",'
+                '"duration_seconds":99,"visual_strategy":"BROKEN",'
+                '"visual_prompt":""}]}'
+            ),
+            (
+                '{"script":"Текст","scenes":[{"scene_id":"scene_01",'
+                '"narration":"Текст","duration_seconds":5,'
+                '"visual_strategy":"LOCAL_VIDEO",'
+                '"visual_prompt":"modern greenhouse","motion_prompt":"slow push in",'
+                '"transition":"cut","overlay_text":""}]}'
+            ),
+        ]
+
+        result = asc_ai_director.create_plan(
+            self.params(director_max_local_video_scenes=1),
+            {"public_research_enabled": False},
+            scheduler_url="http://scheduler:8090",
+            prompt_llm_url="http://prompt-llm:8080",
+        )
+
+        self.assertEqual(result["schema_version"], "mpt.director.v3")
+        self.assertEqual(result["scenes"][0]["visual_strategy"], "LOCAL_VIDEO")
+        self.assertEqual(runtime.chat.call_count, 2)
+        repair_prompt = runtime.chat.call_args_list[1].args[0]
+        self.assertIn("Validation error", repair_prompt)
+        self.assertIn("Previous response", repair_prompt)
+        self.assertIn("duration_seconds", repair_prompt)
+
+    @patch("app.services.asc_ai_director.SchedulerManagedLocalLLM")
+    @patch("app.services.asc_ai_director.local_research.wikipedia_research")
+    def test_director_fails_after_two_invalid_typed_plans(
+        self, research, runtime_cls
+    ):
+        research.return_value = []
+        runtime = runtime_cls.return_value
+        runtime.chat.return_value = (
+            '{"script":"Текст","scenes":[{"visual_strategy":"LOCAL_IMAGE"}]}'
+        )
+
+        with self.assertRaisesRegex(
+            asc_ai_director.DirectorError, "schema validation failed"
+        ):
+            asc_ai_director.create_plan(
+                self.params(),
+                {"public_research_enabled": False},
+                scheduler_url="http://scheduler:8090",
+                prompt_llm_url="http://prompt-llm:8080",
+            )
+
+        self.assertEqual(runtime.chat.call_count, 2)
+
+    def test_director_schema_enforces_video_budget_after_validation(self):
+        raw = {
+            "script": "Текст",
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "duration_seconds": 5,
+                    "visual_strategy": "LOCAL_VIDEO",
+                    "visual_prompt": "first",
+                },
+                {
+                    "scene_id": "scene_02",
+                    "duration_seconds": 5,
+                    "visual_strategy": "LOCAL_VIDEO",
+                    "visual_prompt": "second",
+                },
+            ],
+        }
+        result = asc_ai_director._normalize(
+            raw,
+            self.params(director_max_local_video_scenes=1),
+        )
+        self.assertEqual(
+            [row["visual_strategy"] for row in result["scenes"]],
+            ["LOCAL_VIDEO", "LOCAL_IMAGE"],
+        )
+
     @patch("app.services.asc_ai_qc.quality_control")
     def test_quality_control_uses_canonical_qc_module(self, qc):
         qc.return_value = {
