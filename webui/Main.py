@@ -5336,7 +5336,7 @@ def _render_video_settings(panel, params):
                         icon=":material/health_and_safety:",
                     ):
                         try:
-                            status = asc_ai.health()
+                            status = asc_ai.health(params)
                             st.success(tr("ASC-AI Ready"))
                             st.json(status, expanded=False)
                         except asc_ai.AscAIError as exc:
