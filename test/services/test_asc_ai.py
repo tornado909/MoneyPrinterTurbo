@@ -119,6 +119,66 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertEqual(result, plan)
         request_json.assert_not_called()
 
+    @patch("app.services.asc_ai_director.SchedulerManagedLocalLLM")
+    @patch("app.services.asc_ai_director.local_research.wikipedia_research")
+    def test_director_research_keeps_sources_in_provenance_not_qwen_prompt(
+        self, research, runtime_cls
+    ):
+        research.return_value = [
+            {
+                "title": "Теплица",
+                "extract": "Теплица — сооружение для выращивания растений.",
+                "source": "wikipedia",
+                "source_url": "https://ru.wikipedia.org/?curid=123",
+            }
+        ]
+        runtime = runtime_cls.return_value
+        runtime.chat.return_value = (
+            '{"script":"Текст","scenes":[{"scene_id":"scene_01",'
+            '"narration":"Текст","duration_seconds":5,'
+            '"visual_strategy":"LOCAL_IMAGE",'
+            '"visual_prompt":"modern greenhouse","motion_prompt":"",'
+            '"transition":"cut","overlay_text":""}]}'
+        )
+        result = asc_ai_director.create_plan(
+            self.params(),
+            {
+                "public_research_enabled": True,
+                "research_max_pages": 2,
+                "research_max_chars_per_page": 1200,
+            },
+            scheduler_url="http://scheduler:8090",
+            prompt_llm_url="http://prompt-llm:8080",
+        )
+
+        prompt = runtime.chat.call_args.args[0]
+        self.assertIn("Теплица — сооружение", prompt)
+        self.assertNotIn("https://ru.wikipedia.org", prompt)
+        self.assertEqual(
+            result["research"][0]["source_url"],
+            "https://ru.wikipedia.org/?curid=123",
+        )
+
+    @patch("app.services.asc_ai_director.SchedulerManagedLocalLLM")
+    @patch("app.services.asc_ai_director.local_research.wikipedia_research")
+    def test_director_can_disable_public_research(self, research, runtime_cls):
+        runtime = runtime_cls.return_value
+        runtime.chat.return_value = (
+            '{"script":"Текст","scenes":[{"scene_id":"scene_01",'
+            '"narration":"Текст","duration_seconds":5,'
+            '"visual_strategy":"LOCAL_IMAGE",'
+            '"visual_prompt":"modern greenhouse","motion_prompt":"",'
+            '"transition":"cut","overlay_text":""}]}'
+        )
+        result = asc_ai_director.create_plan(
+            self.params(),
+            {"public_research_enabled": False},
+            scheduler_url="http://scheduler:8090",
+            prompt_llm_url="http://prompt-llm:8080",
+        )
+        research.assert_not_called()
+        self.assertEqual(result["research"], [])
+
     @patch("app.services.asc_ai_qc.quality_control")
     def test_quality_control_uses_canonical_qc_module(self, qc):
         qc.return_value = {
