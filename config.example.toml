@@ -658,6 +658,11 @@ public_research_enabled = true
 research_max_pages = 2
 research_max_chars_per_page = 1200
 research_timeout_seconds = 8
+# If the selected narration-language Wikipedia has too little context, fill the
+# remaining bounded page budget from these public language editions.
+research_fallback_languages = ["en"]
+# Avoid repeating the same public HTTP lookups during retries/re-renders.
+research_cache_ttl_seconds = 3600
 generic_text_temperature = 0.35
 generic_text_max_tokens = 2500
 # Optional extra Prompt Intelligence planning for LOCAL_VIDEO scenes.
