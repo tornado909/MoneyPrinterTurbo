@@ -555,6 +555,86 @@ def _video_compatibility(aspect: Any) -> dict:
     }
 
 
+def _execution_provenance(result: dict) -> dict:
+    settings = result.get("settings") or {}
+    if not isinstance(settings, dict):
+        settings = {}
+    keep_settings = {
+        key: settings.get(key)
+        for key in (
+            "seed",
+            "steps",
+            "cfg",
+            "width",
+            "height",
+            "length",
+            "fps",
+            "sampler",
+            "scheduler",
+            "denoise",
+        )
+        if settings.get(key) is not None
+    }
+
+    workflow = result.get("workflow") or {}
+    if not isinstance(workflow, dict):
+        workflow = {}
+    model = result.get("model") or {}
+    if not isinstance(model, dict):
+        model = {}
+    timing = result.get("timing") or {}
+    if not isinstance(timing, dict):
+        timing = {}
+    telemetry = result.get("telemetry") or {}
+    if not isinstance(telemetry, dict):
+        telemetry = {}
+    peak = telemetry.get("observed_peak") or {}
+    if not isinstance(peak, dict):
+        peak = {}
+
+    outputs = []
+    for row in (result.get("outputs") or [])[:4]:
+        if not isinstance(row, dict):
+            continue
+        outputs.append(
+            {
+                key: row.get(key)
+                for key in ("artifact_id", "role", "path", "sha256")
+                if row.get(key) is not None
+            }
+        )
+
+    return {
+        "state": result.get("state"),
+        "job_id": result.get("job_id"),
+        "stage_id": result.get("stage_id"),
+        "lease_id": result.get("lease_id"),
+        "workflow": {
+            key: workflow.get(key)
+            for key in ("workflow_id", "version", "graph_sha256")
+            if workflow.get(key) is not None
+        },
+        "model": {
+            key: model.get(key)
+            for key in ("model_id", "sha256")
+            if model.get(key) is not None
+        },
+        "settings": keep_settings,
+        "outputs": outputs,
+        "peak": {
+            key: peak.get(key)
+            for key in (
+                "vram_used_mb",
+                "gpu_utilization_percent",
+                "temperature_c",
+                "power_draw_w",
+            )
+            if peak.get(key) is not None
+        },
+        "duration_seconds": timing.get("duration_seconds"),
+    }
+
+
 def _output_path(result: dict, media_type: str) -> str:
     outputs = result.get("outputs") or []
     if not outputs or not isinstance(outputs[0], dict):
@@ -577,7 +657,8 @@ def generate_image(
     *,
     attempt: int = 1,
     binding: dict | None = None,
-) -> str:
+    return_execution: bool = False,
+):
     binding = binding or _image_binding(scene)
     width, height = _workflow_resolution(binding, aspect)
     prompt = str(scene.get("visual_prompt") or "").strip()
@@ -679,7 +760,10 @@ def generate_image(
         json=payload,
         timeout=(5, float(_setting("generation_timeout_seconds", 1800))),
     )
-    return _output_path(result, "image")
+    output_path = _output_path(result, "image")
+    if return_execution:
+        return output_path, _execution_provenance(result)
+    return output_path
 
 
 def _safe_token(value: str) -> str:
@@ -720,7 +804,8 @@ def generate_video_from_image(
     image_path: str,
     *,
     binding: dict | None = None,
-) -> str:
+    return_execution: bool = False,
+):
     binding = binding or _video_binding()
     scene_id = str(scene.get("scene_id") or "scene")
     input_name = stage_image_for_video(task_id, scene_id, image_path)
@@ -765,7 +850,10 @@ def generate_video_from_image(
         json=payload,
         timeout=(5, float(_setting("generation_timeout_seconds", 1800))),
     )
-    return _output_path(result, "video")
+    output_path = _output_path(result, "video")
+    if return_execution:
+        return output_path, _execution_provenance(result)
+    return output_path
 
 
 def stage_for_qc(
