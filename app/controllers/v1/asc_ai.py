@@ -73,8 +73,8 @@ class ProductionRequest(DirectorPlanRequest):
 
     def to_task_request(self) -> TaskVideoRequest:
         configured_voice = str(
-            config.ui.get("voice_name", "chatterbox:default-Female")
-            or "chatterbox:default-Female"
+            config.ui.get("voice_name", "chatterbox:ru-default")
+            or "chatterbox:ru-default"
         )
         configured_tts = str(
             config.ui.get("tts_server", "chatterbox") or "chatterbox"
@@ -82,7 +82,7 @@ class ProductionRequest(DirectorPlanRequest):
         if configured_tts != "chatterbox" or not configured_voice.startswith(
             "chatterbox:"
         ):
-            configured_voice = "chatterbox:default-Female"
+            configured_voice = "chatterbox:ru-default"
         return TaskVideoRequest(
             video_subject=self.video_subject,
             video_script=self.video_script,
