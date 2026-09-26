@@ -1,0 +1,57 @@
+# Optional pinned CPU-only Chatterbox overlay for ASC-AI production.
+#
+# Run together with the normal ASC-AI overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml \
+#     -f docker-compose.chatterbox.yml up -d --build
+#
+# The TTS service has no GPU access. Model cache and uploaded Russian voices
+# persist under /srv/ai and /srv/ai-data.
+services:
+  chatterbox-tts:
+    build:
+      context: .
+      dockerfile: docker/chatterbox/Dockerfile.cpu
+      args:
+        CHATTERBOX_API_SHA: a5f466128e4baa8e4cceb3bba9b7ca9de6f7ec6b
+        CHATTERBOX_MULTILINGUAL_SHA: c33cc0286ad166f14dd143c02c2a1c3309ab4727
+    container_name: moneyprinterturbo-chatterbox-tts
+    environment:
+      DEVICE: cpu
+      USE_MULTILINGUAL_MODEL: "true"
+      PORT: "4123"
+      HOST: 0.0.0.0
+      MODEL_CACHE_DIR: /cache
+      VOICE_LIBRARY_DIR: /voices
+      LONG_TEXT_DATA_DIR: /data/long_text_jobs
+      MAX_CHUNK_LENGTH: "280"
+      MAX_TOTAL_LENGTH: "3000"
+      ENABLE_MEMORY_MONITORING: "true"
+    volumes:
+      - /srv/ai/cache/chatterbox:/cache
+      - /srv/ai-data/chatterbox/voices:/voices
+      - /srv/ai-data/chatterbox/long-text:/data/long_text_jobs
+    ports:
+      - "127.0.0.1:4123:4123"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4123/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+    networks:
+      - default
+
+  webui:
+    environment:
+      MPT_CHATTERBOX_BASE_URL: http://chatterbox-tts:4123/v1
+    depends_on:
+      chatterbox-tts:
+        condition: service_healthy
+
+  api:
+    environment:
+      MPT_CHATTERBOX_BASE_URL: http://chatterbox-tts:4123/v1
+    depends_on:
+      chatterbox-tts:
+        condition: service_healthy
