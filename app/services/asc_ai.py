@@ -651,8 +651,10 @@ def generate_image(
         "model_id": str(binding["model_id"]),
         "prompt": prompt,
         "original_user_prompt": prompt,
-        "prompt_compiler_id": "CHARACTER_HUB" if identity else "RAW",
-        "prompt_compiler_version": "mpt-director-v2",
+        "prompt_compiler_id": "RAW",
+        "prompt_compiler_version": (
+            "mpt-director-character-v2" if identity else "mpt-director-v2"
+        ),
         "negative_prompt": negative_prompt,
         "reference_inputs": reference_inputs,
         "overrides": overrides,
