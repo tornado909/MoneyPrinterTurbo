@@ -11,7 +11,7 @@ import requests
 from loguru import logger
 
 from app.config import config
-from app.services import asc_ai_director, asc_ai_qc, video
+from app.services import asc_ai_character, asc_ai_director, asc_ai_qc, video
 from app.utils import utils
 
 
@@ -54,6 +54,13 @@ def _visual_url() -> str:
     return (
         os.getenv("ASC_AI_VISUAL_ANALYZER_URL")
         or str(_setting("visual_analyzer_url", "http://127.0.0.1:8095"))
+    ).rstrip("/")
+
+
+def _character_url() -> str:
+    return (
+        os.getenv("ASC_AI_CHARACTER_HUB_URL")
+        or str(_setting("character_hub_url", "http://127.0.0.1:8096"))
     ).rstrip("/")
 
 
@@ -277,14 +284,30 @@ def create_director_plan(params) -> dict:
     if not enabled():
         raise AscAIError("ASC-AI integration is disabled")
     try:
+        character_identity = None
+        character_id = str(
+            getattr(params, "director_character_id", "") or ""
+        ).strip()
+        if character_id:
+            character_identity = asc_ai_character.get_character(
+                _character_url(),
+                character_id,
+                timeout=float(_setting("character_hub_timeout_seconds", 10)),
+            )
         plan = asc_ai_director.create_plan(
             params,
             dict(config.asc_ai),
             scheduler_url=_scheduler_url(),
             prompt_llm_url=_prompt_llm_url(),
+            character_identity=character_identity,
         )
+        if character_identity:
+            plan["character_identity"] = character_identity
+            for scene in plan.get("scenes") or []:
+                if isinstance(scene, dict):
+                    scene["character_identity"] = character_identity
         return enrich_director_plan(plan)
-    except asc_ai_director.DirectorError as exc:
+    except (asc_ai_director.DirectorError, asc_ai_character.CharacterHubError) as exc:
         raise AscAIError(str(exc)) from exc
 
 
