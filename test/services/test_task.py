@@ -327,6 +327,7 @@ class TestTaskService(unittest.TestCase):
             patch.object(tm.asc_ai, "validate_local_only"),
             patch.object(tm.asc_ai, "create_director_plan", return_value=director_plan),
             patch.object(tm.asc_ai, "persist_director_plan"),
+            patch.object(tm.asc_ai, "persist_execution_plan"),
             patch.object(tm, "save_script_data"),
             patch.object(
                 tm, "generate_audio", return_value=("audio.wav", 12, object())
@@ -350,7 +351,7 @@ class TestTaskService(unittest.TestCase):
         self.assertEqual(result["videos"], ["final.mp4"])
         final_params = final.call_args.args[1]
         self.assertEqual(final_params.video_concat_mode, VideoConcatMode.sequential)
-        self.assertEqual(final_params.video_clip_duration, 9)
+        self.assertEqual(final_params.video_clip_duration, 8)
 
     def test_run_pipeline_fails_fast_when_ffmpeg_is_not_ready(self):
         """完整视频流水线必须在 LLM/TTS/素材服务之前先确认 FFmpeg 可用。"""
