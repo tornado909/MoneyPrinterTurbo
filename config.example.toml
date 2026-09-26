@@ -578,7 +578,10 @@ base_url = "http://127.0.0.1:4123/v1"
 api_key = ""
 model_id = "tts-1"
 # Voice names exposed by the configured Chatterbox server.
-voices = ["default-Female"]
+# The ASC-AI Russian production path requires ru-default to be uploaded with
+# language=ru; scripts/bootstrap-chatterbox-ru-voice.sh does this idempotently.
+voices = ["ru-default"]
+default_voice = "ru-default"
 
 [kokoro]
 # OpenAI-compatible Kokoro TTS server (hexgrad/Kokoro-82M, Apache-2.0, runs on CPU).
@@ -589,9 +592,6 @@ model_id = "kokoro"
 # Voice names (af_heart, bf_emma, hf_alpha, ...). Leave empty to read the list
 # from the server (GET {base_url}/audio/voices).
 voices = []
-# The Russian ASC-AI production path expects this voice to exist in the local
-# Chatterbox voice library with language=ru. Upload it once via /v1/voices.
-default_voice = "ru-default"
 
 [fish_audio]
 # Fish Audio TTS service: https://fish.audio
