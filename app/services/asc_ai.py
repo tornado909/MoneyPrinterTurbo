@@ -71,6 +71,14 @@ def _prompt_llm_url() -> str:
     ).rstrip("/")
 
 
+def _chatterbox_root_url() -> str:
+    base_url = (
+        os.getenv("MPT_CHATTERBOX_BASE_URL")
+        or str(config.chatterbox.get("base_url", "http://127.0.0.1:4123/v1"))
+    ).rstrip("/")
+    return base_url[:-3] if base_url.endswith("/v1") else base_url
+
+
 def _request_json(
     method: str,
     url: str,
@@ -170,6 +178,9 @@ def health() -> dict:
         ),
         "visual_analyzer": _request_json(
             "GET", _visual_url() + "/health", timeout=(3, 10)
+        ),
+        "chatterbox_tts": _request_json(
+            "GET", _chatterbox_root_url() + "/health", timeout=(3, 10)
         ),
     }
 
