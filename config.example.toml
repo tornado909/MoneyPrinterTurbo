@@ -680,6 +680,11 @@ generation_timeout_seconds = 1800
 qc_enabled = true
 qc_required = true
 qc_profile = "FAST"
+# "adaptive" registers every still but loads Qwen3-VL only for the first frame,
+# every Nth frame, Character Hub scenes and QC retries. "full" analyzes every
+# still; "structural" skips VLM for stills. Wan video QC always uses VLM.
+qc_image_policy = "adaptive"
+qc_image_vlm_stride = 3
 # Visual Analyzer intentionally observes actual media and does not invent a
 # prompt-similarity score. QC gates on its sealed technical assessment.
 qc_max_image_regenerations = 1
