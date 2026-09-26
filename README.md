@@ -12,7 +12,7 @@
 
 - **Полный русский WebUI:** русская локаль является primary edition и должна полностью покрывать английские UI-ключи.
 - **ASC-AI — источник по умолчанию:** `video_source = "asc_ai"`.
-- **Director по умолчанию:** локальный Qwen3-8B создаёт сценарий и production-ready scene plan; по желанию получает до двух коротких публичных MediaWiki-выдержек без платного AI API.
+- **Director по умолчанию:** локальный Qwen3-8B создаёт typed production-ready scene plan; malformed JSON получает одну bounded repair-попытку, а public MediaWiki research кэшируется и при необходимости добирается из fallback-языка без платного AI API.
 - **Никакого прямого ComfyUI:** изображения и I2V идут только через ASC-AI Image Adapter.
 - **GPU Scheduler обязателен:** Director получает lease перед локальным LLM inference; Krea/Lustify, Wan и Qwen3-VL используют существующий ASC-AI control plane.
 - **Строгий local-only:** облачные LLM/TTS/image/video/music providers и автоматическая сторонняя публикация блокируются в production-пути.
@@ -20,7 +20,7 @@
 - **Экономия GPU:** большая часть сцен может быть статичной генерацией + лёгким zoom/pan; число Wan I2V сцен задаётся Director budget, а несовместимый aspect ratio отсекается до GPU enqueue.
 - **Character Hub continuity:** Director может закрепить одного canonical персонажа между сценами через reference artifacts/LoRA из ASC-AI Character Hub.
 - **Production manifest:** для каждой задачи сохраняется `production-manifest.json` с Scheduler job/stage/lease, seed/settings, artifact IDs, QC, fallback и фактическими выходами.
-- **Headless API:** ASC-AI агент может использовать `/api/v1/asc-ai/capabilities`, `/health`, `/characters` и `/director/plan` без WebUI.
+- **Headless API:** ASC-AI агент может планировать и запускать полный render через отдельный `/api/v1/asc-ai/*` namespace без знания внутреннего `VideoParams`.
 - **Устойчивое ASC-AI-развёртывание:** production overlay включает Redis с AOF для очереди/состояний задач.
 - Китайский README upstream сохранён как `README-upstream-zh.md` для удобной синхронизации.
 
@@ -108,9 +108,12 @@ GET  /api/v1/asc-ai/health
 GET  /api/v1/asc-ai/characters
 GET  /api/v1/asc-ai/characters/{character_id}
 POST /api/v1/asc-ai/director/plan
+POST /api/v1/asc-ai/production
 ```
 
-`POST /director/plan` выполняет только research/Character Hub preflight + scheduler-managed Qwen planning и **не запускает Image Adapter/Wan render**. Полный render остаётся в штатной task API MoneyPrinterTurbo.
+`POST /director/plan` выполняет только research/Character Hub preflight + scheduler-managed Qwen planning и **не запускает Image Adapter/Wan render**.
+
+`POST /production` выполняет полный local-only preflight, преобразует простой ASC-AI request в штатный `TaskVideoRequest` и ставит render в **тот же TaskManager/Redis queue**, что обычный `/videos`. Ответ возвращает обычный `task_id`; статус читается через `GET /api/v1/tasks/{task_id}`.
 
 ## Local-only policy
 
