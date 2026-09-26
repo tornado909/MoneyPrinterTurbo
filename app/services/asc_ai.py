@@ -1,15 +1,9 @@
 from __future__ import annotations
 
 import json
-import math
-import mimetypes
 import os
 import re
 import shutil
-import threading
-import time
-import uuid
-from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -220,14 +214,93 @@ def create_director_plan(params) -> dict:
     if not enabled():
         raise AscAIError("ASC-AI integration is disabled")
     try:
-        return asc_ai_director.create_plan(
+        plan = asc_ai_director.create_plan(
             params,
             dict(config.asc_ai),
             scheduler_url=_scheduler_url(),
             prompt_llm_url=_prompt_llm_url(),
         )
+        return enrich_director_plan(plan)
     except asc_ai_director.DirectorError as exc:
         raise AscAIError(str(exc)) from exc
+
+
+def enrich_director_plan(plan: dict) -> dict:
+    """Use Prompt Intelligence only for expensive Director scenes.
+
+    This intentionally does not replace the Director visual prompt: Prompt
+    Intelligence contributes its governed resource routing/provenance while the
+    production Director remains authoritative for story continuity.
+    """
+    if not bool(_setting("pi_enrich_video_scenes", True)):
+        return plan
+
+    scenes = []
+    for scene in plan.get("scenes") or []:
+        current = dict(scene)
+        if current.get("visual_strategy") != "LOCAL_VIDEO":
+            scenes.append(current)
+            continue
+
+        request_text = str(current.get("visual_prompt") or "").strip()
+        motion = str(current.get("motion_prompt") or "").strip()
+        if motion:
+            request_text += f". Intended motion: {motion}"
+        if not request_text:
+            scenes.append(current)
+            continue
+
+        try:
+            pi_plan = _request_json(
+                "POST",
+                _prompt_url() + "/api/v1/prompt-intelligence/plans",
+                json={
+                    "raw_user_request": request_text,
+                    "target_model": "krea",
+                    "resource_mode": str(_setting("pi_resource_mode", "AUTO")),
+                },
+                timeout=(5, float(_setting("pi_planning_timeout_seconds", 180))),
+            )
+            selected = (
+                ((pi_plan.get("derived_prompt") or {}).get("resource_plan") or {})
+                .get("selected_resources")
+                or []
+            )
+            loras = []
+            for row in selected:
+                if not isinstance(row, dict):
+                    continue
+                model_id = str(row.get("model_id") or row.get("lora_id") or "").strip()
+                if not model_id:
+                    continue
+                try:
+                    strength = float(row.get("strength", 1.0))
+                except (TypeError, ValueError):
+                    strength = 1.0
+                loras.append(
+                    {
+                        "model_id": model_id,
+                        "strength": max(0.0, min(2.0, strength)),
+                    }
+                )
+            current["prompt_intelligence"] = {
+                "plan_id": pi_plan.get("plan_id"),
+                "scene_spec": pi_plan.get("scene_spec"),
+                "evidence_trace": pi_plan.get("evidence_trace"),
+                "selected_resources": selected,
+            }
+            current["image_loras"] = loras
+        except Exception as exc:
+            logger.warning(
+                "ASC-AI Prompt Intelligence enrichment failed; keeping Director "
+                f"scene unchanged: scene={current.get('scene_id')}, "
+                f"error={type(exc).__name__}"
+            )
+        scenes.append(current)
+
+    result = dict(plan)
+    result["scenes"] = scenes
+    return result
 
 
 def persist_director_plan(task_id: str, plan: dict) -> str:
@@ -312,7 +385,7 @@ def generate_image(task_id: str, scene: dict, aspect: Any) -> str:
         },
         "priority": int(_setting("priority", 120)),
         "idempotency_key": f"mpt-{task_id}-{scene_id}-image"[:200],
-        "loras": [],
+        "loras": list(scene.get("image_loras") or []),
         "experimental_resources_opt_in": False,
         "experimental_model_opt_in": False,
     }
