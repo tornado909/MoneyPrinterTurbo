@@ -123,6 +123,7 @@ class VideoParams(BaseModel):
     director_style: str = Field(default="", max_length=2000)
     director_audience: str = Field(default="", max_length=1000)
     director_purpose: str = Field(default="", max_length=1000)
+    director_character_id: str = Field(default="", max_length=128)
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )
