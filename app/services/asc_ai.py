@@ -839,11 +839,33 @@ def generate_scene_materials(
     try:
         for scene in scenes:
             working_scene = dict(scene)
+            scene_binding = _image_binding(working_scene)
+            scene_width, scene_height = _workflow_resolution(
+                scene_binding, aspect
+            )
+            identity = working_scene.get("character_identity") or {}
             scene_record = {
                 "scene_id": scene.get("scene_id"),
                 "requested_strategy": scene.get("visual_strategy"),
                 "visual_prompt": scene.get("visual_prompt"),
                 "motion_prompt": scene.get("motion_prompt"),
+                "character": {
+                    "character_id": identity.get("character_id"),
+                    "visual_identity_kind": identity.get(
+                        "visual_identity_kind"
+                    ),
+                    "reference_count": len(
+                        identity.get("reference_artifact_ids") or []
+                    ),
+                    "lora_count": len(identity.get("lora_resource_ids") or []),
+                }
+                if identity
+                else None,
+                "image_workflow": {
+                    "workflow_id": scene_binding.get("workflow_id"),
+                    "model_id": scene_binding.get("model_id"),
+                    "resolution": f"{scene_width}x{scene_height}",
+                },
                 "image_attempts": [],
                 "video": None,
                 "fallback": None,
