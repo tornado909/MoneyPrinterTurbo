@@ -297,6 +297,55 @@ class TestAscAIIntegration(unittest.TestCase):
                 manifest["scenes"][0]["fallback"], "video_generation_failed"
             )
 
+    @patch("app.services.asc_ai._output_path", return_value="/tmp/generated.png")
+    @patch("app.services.asc_ai._request_json", return_value={"outputs": [{"path": "/tmp/generated.png"}]})
+    @patch("app.services.asc_ai._workflow_resolution", return_value=(1024, 1024))
+    @patch(
+        "app.services.asc_ai._image_binding",
+        return_value={"workflow_id": "image-v1", "model_id": "model-v1"},
+    )
+    def test_image_qc_retries_use_distinct_idempotency_keys(
+        self, _binding, _resolution, request_json, _output
+    ):
+        scene = {"scene_id": "scene_01", "visual_prompt": "greenhouse"}
+        asc_ai.generate_image("task-1", scene, "9:16", attempt=1)
+        asc_ai.generate_image("task-1", scene, "9:16", attempt=2)
+
+        first = request_json.call_args_list[0].kwargs["json"]["idempotency_key"]
+        second = request_json.call_args_list[1].kwargs["json"]["idempotency_key"]
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.endswith("-attempt-1"))
+        self.assertTrue(second.endswith("-attempt-2"))
+
+    def test_i2v_staging_replaces_stale_source_on_task_retry(self):
+        old_root = config.asc_ai.get("input_root")
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                input_root = Path(temp_dir) / "input"
+                input_root.mkdir()
+                config.asc_ai["input_root"] = str(input_root)
+                first = Path(temp_dir) / "first.png"
+                second = Path(temp_dir) / "second.png"
+                first.write_bytes(b"first-image")
+                second.write_bytes(b"second-image")
+
+                relative = asc_ai.stage_image_for_video(
+                    "task-1", "scene_01", str(first)
+                )
+                target = input_root / relative
+                self.assertEqual(target.read_bytes(), b"first-image")
+
+                same_relative = asc_ai.stage_image_for_video(
+                    "task-1", "scene_01", str(second)
+                )
+                self.assertEqual(relative, same_relative)
+                self.assertEqual(target.read_bytes(), b"second-image")
+        finally:
+            if old_root is None:
+                config.asc_ai.pop("input_root", None)
+            else:
+                config.asc_ai["input_root"] = old_root
+
     @patch("app.services.asc_ai._workflow_catalog")
     def test_runtime_catalog_binding_uses_catalog_model(self, catalog):
         catalog.return_value = [
