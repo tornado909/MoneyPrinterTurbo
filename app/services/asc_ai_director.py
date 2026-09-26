@@ -317,7 +317,14 @@ def _normalize(raw: dict, params) -> dict:
     }
 
 
-def create_plan(params, settings: dict, *, scheduler_url: str, prompt_llm_url: str) -> dict:
+def create_plan(
+    params,
+    settings: dict,
+    *,
+    scheduler_url: str,
+    prompt_llm_url: str,
+    character_identity: dict | None = None,
+) -> dict:
     aspect = getattr(params.video_aspect, "value", params.video_aspect) or "9:16"
     target = int(
         getattr(params, "director_target_duration_seconds", 0)
@@ -349,6 +356,41 @@ def create_plan(params, settings: dict, *, scheduler_url: str, prompt_llm_url: s
         except local_research.ResearchError:
             research_items = []
 
+    character_context = ""
+    if character_identity:
+        name = str(character_identity.get("name") or "").strip()
+        appearance = str(character_identity.get("appearance") or "").strip()
+        forbidden = [
+            str(value).strip()
+            for value in (character_identity.get("forbidden_traits") or [])
+            if str(value).strip()
+        ]
+        captions = [
+            str(value).strip()
+            for value in (character_identity.get("reference_captions") or [])
+            if str(value).strip()
+        ]
+        character_context = (
+            "\nCanonical recurring character identity:\n"
+            f"- character: {name}\n"
+            f"- appearance anchor: {appearance}\n"
+            + (
+                "- reference observations: " + "; ".join(captions[:4]) + "\n"
+                if captions
+                else ""
+            )
+            + (
+                "- forbidden identity drift: " + "; ".join(forbidden[:12]) + "\n"
+                if forbidden
+                else ""
+            )
+            + (
+                "Every scene containing this character must preserve the same "
+                "recognizable identity, appearance, hair, face, body traits and "
+                "signature wardrobe unless the user explicitly asks for a change.\n"
+            )
+        )
+
     research_context = ""
     if research_items:
         research_lines = [
@@ -374,6 +416,7 @@ Audience: {getattr(params, 'director_audience', '')}
 Purpose: {getattr(params, 'director_purpose', '')}
 Visual style: {getattr(params, 'director_style', '') or settings.get('director_style', '')}
 Maximum LOCAL_VIDEO scenes: {getattr(params, 'director_max_local_video_scenes', 1)}
+{character_context}
 {research_context}
 
 {instruction}
