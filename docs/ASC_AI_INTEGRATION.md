@@ -32,6 +32,15 @@ MoneyPrinterTurbo ожидает OpenAI-compatible endpoint http://127.0.0.1:412
     cp config.example.toml config.toml
     docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml up -d --build
 
+Сначала в ASC-AI поднимите CPU-only TTS overlay:
+
+    cd /opt/ai-stack
+    sudo -n mkdir -p /srv/ai/cache/chatterbox /srv/ai-data/chatterbox/voices
+    docker compose -f compose.yaml -f compose.chatterbox.yaml build chatterbox-tts
+    docker compose -f compose.yaml -f compose.chatterbox.yaml up -d --no-deps chatterbox-tts
+
+Затем запустите MoneyPrinterTurbo. Его контейнеры присоединяются к external network `asc-ai-stack_default` и обращаются к `prompt-intelligence:8094`, `image-adapter:8091` и `chatterbox-tts:4123` напрямую.
+
 WebUI: http://127.0.0.1:8501
 API: http://127.0.0.1:8080/docs
 
