@@ -99,6 +99,21 @@ class TestAscAIIntegration(unittest.TestCase):
         )
 
     @patch("app.services.asc_ai._component_health", return_value={"status": "ok"})
+    def test_task_chatterbox_voice_overrides_stale_cloud_tts_provider(self, health):
+        config.ui["voice_mode"] = "tts"
+        config.ui["tts_server"] = "azure-tts-v1"
+        params = self.params(
+            custom_audio_file="",
+            voice_name="chatterbox:default-Female",
+        )
+
+        asc_ai.preflight(params, stop_at="video")
+
+        names = [call.args[0] for call in health.call_args_list]
+        self.assertIn("chatterbox_tts", names)
+        self.assertNotIn("azure-tts-v1", names)
+
+    @patch("app.services.asc_ai._component_health", return_value={"status": "ok"})
     def test_custom_audio_preflight_does_not_require_tts(self, health):
         params = self.params(custom_audio_file="voice.wav")
         asc_ai.preflight(params, stop_at="video")
