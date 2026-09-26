@@ -570,6 +570,8 @@
     "MuAPI Billing Notice Without Script": "Каждый созданный клип оплачивается в MuAPI. Введите или сгенерируйте сценарий, чтобы увидеть примерное число задач.",
     "Confirm MuAPI Charge": "Я понимаю, что генерация видео MuAPI создаёт платные задачи",
     "Confirm MuAPI Charge Help": "Клипы MuAPI отправляются по одному до покрытия длительности озвучки. Неоднозначный ответ при отправке не повторяется автоматически, поскольку удалённая платная задача уже могла быть создана.",
-    "Confirm MuAPI Charge Required": "Перед генерацией подтвердите, что понимаете платный характер MuAPI."
+    "Confirm MuAPI Charge Required": "Перед генерацией подтвердите, что понимаете платный характер MuAPI.",
+    "ASC-AI Director": "ASC-AI Director (локально)",
+    "ASC-AI Director Help": "Локальный pipeline: Qwen Director через GPU Scheduler → ASC-AI Image Adapter → локальные изображения и Wan I2V. Платные AI API не используются."
   }
 }
