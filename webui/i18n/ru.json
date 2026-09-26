@@ -572,6 +572,17 @@
     "Confirm MuAPI Charge Help": "Клипы MuAPI отправляются по одному до покрытия длительности озвучки. Неоднозначный ответ при отправке не повторяется автоматически, поскольку удалённая платная задача уже могла быть создана.",
     "Confirm MuAPI Charge Required": "Перед генерацией подтвердите, что понимаете платный характер MuAPI.",
     "ASC-AI Director": "ASC-AI Director (локально)",
-    "ASC-AI Director Help": "Локальный pipeline: Qwen Director через GPU Scheduler → ASC-AI Image Adapter → локальные изображения и Wan I2V. Платные AI API не используются."
+    "ASC-AI Director Help": "Локальный pipeline: Qwen Director через GPU Scheduler → ASC-AI Image Adapter → локальные изображения и Wan I2V. Платные AI API не используются.",
+    "Director Settings": "Director",
+    "Director Target Duration": "Целевая длительность, сек",
+    "Director Target Duration Help": "Director использует это значение как цель для сценария и бюджета сцен. При монтаже фактическая длительность выравнивается по готовой озвучке.",
+    "Director Local Video Scenes": "Сцены Wan I2V",
+    "Director Local Video Scenes Help": "Максимальное число сцен, для которых разрешена локальная Wan image-to-video генерация. 0 — самый экономный режим только с изображениями.",
+    "Director Visual Style": "Общий визуальный стиль",
+    "Director Audience": "Целевая аудитория",
+    "Director Purpose": "Цель ролика",
+    "Check ASC-AI": "Проверить ASC-AI",
+    "ASC-AI Ready": "Сервисы ASC-AI доступны",
+    "ASC-AI Unavailable": "Проверка ASC-AI не пройдена: {error}"
   }
 }
