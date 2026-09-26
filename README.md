@@ -51,7 +51,11 @@ cp config.example.toml config.toml
 docker compose \
   -f docker-compose.yml \
   -f docker-compose.asc-ai.yml \
+  -f docker-compose.chatterbox.yml \
   up -d --build
+
+# Один раз загрузите русский reference voice:
+bash scripts/bootstrap-chatterbox-ru-voice.sh /path/to/russian-reference.wav
 ```
 
 WebUI:
@@ -130,7 +134,15 @@ POST /api/v1/asc-ai/production
 
 ## Локальная озвучка
 
-Форк рассчитан на self-hosted **Chatterbox Multilingual** через OpenAI-compatible API. В ASC-AI Docker overlay запросы по умолчанию идут на:
+Форк рассчитан на self-hosted **Chatterbox Multilingual** через OpenAI-compatible API. Рекомендуемый `docker-compose.chatterbox.yml` собирает CPU-only runtime из закреплённых commit SHA и подключает его к MoneyPrinterTurbo без GPU.
+
+Русский production voice по умолчанию — `chatterbox:ru-default`. Он **обязан** существовать в voice library с `language=ru`; preflight проверяет это до постановки задачи в очередь. Загрузить reference sample можно один раз:
+
+```bash
+bash scripts/bootstrap-chatterbox-ru-voice.sh /path/to/russian-reference.wav
+```
+
+Без дополнительного TTS overlay ASC-AI Docker overlay может обращаться к уже запущенному host-local Chatterbox:
 
 ```text
 http://host.docker.internal:4123/v1
@@ -157,6 +169,8 @@ http://host.docker.internal:4123/v1
 
 ```bash
 python -m unittest test.services.test_asc_ai
+python -m unittest test.services.test_controller_asc_ai
+python -m unittest test.services.test_local_research
 python -m unittest test.services.test_webui_i18n
 ```
 
