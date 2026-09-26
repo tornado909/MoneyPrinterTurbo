@@ -5236,6 +5236,20 @@ def _render_video_settings(panel, params):
                         "ui", "director_purpose", params.director_purpose
                     )
 
+                    public_research_enabled = st.checkbox(
+                        tr("Director Public Research"),
+                        value=bool(
+                            config.asc_ai.get("public_research_enabled", True)
+                        ),
+                        key="director_public_research_enabled",
+                        help=tr("Director Public Research Help"),
+                    )
+                    _set_runtime_config(
+                        "asc_ai",
+                        "public_research_enabled",
+                        public_research_enabled,
+                    )
+
                     if st.button(
                         tr("Check ASC-AI"),
                         key="check_asc_ai_health",
