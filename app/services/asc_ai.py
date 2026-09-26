@@ -894,7 +894,7 @@ def generate_video_from_image(
         )
     visual = str(scene.get("visual_prompt") or "").strip()
     combined_prompt = f"{visual}. Motion: {prompt}" if visual else prompt
-    duration = int(_setting("video_duration_seconds", 5))
+    duration = int(scene.get("duration_seconds") or _setting("video_duration_seconds", 5))
     if duration not in {3, 5}:
         duration = 5
     payload = {
@@ -1229,7 +1229,7 @@ def generate_scene_materials(
                         if video_qc.get("passed"):
                             output_path = candidate_video
                             effective_scene_seconds = int(
-                                _setting("video_duration_seconds", 5)
+                                working_scene.get("duration_seconds") or 5
                             )
                             if effective_scene_seconds not in {3, 5}:
                                 effective_scene_seconds = 5
