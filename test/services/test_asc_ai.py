@@ -81,9 +81,16 @@ class TestAscAIIntegration(unittest.TestCase):
         names = [call.args[0] for call in health.call_args_list]
         self.assertEqual(names, ["scheduler", "prompt_llm"])
 
+    @patch(
+        "app.services.asc_ai._chatterbox_voice_info",
+        return_value={"name": "ru-default", "language": "ru", "aliases": []},
+    )
     @patch("app.services.asc_ai._component_health", return_value={"status": "ok"})
-    def test_video_preflight_checks_full_local_pipeline(self, health):
-        params = self.params(custom_audio_file="")
+    def test_video_preflight_checks_full_local_pipeline(self, health, _voice):
+        params = self.params(
+            custom_audio_file="",
+            voice_name="chatterbox:ru-default",
+        )
         asc_ai.preflight(params, stop_at="video")
         names = [call.args[0] for call in health.call_args_list]
         self.assertEqual(
@@ -98,13 +105,19 @@ class TestAscAIIntegration(unittest.TestCase):
             ],
         )
 
+    @patch(
+        "app.services.asc_ai._chatterbox_voice_info",
+        return_value={"name": "ru-default", "language": "ru", "aliases": []},
+    )
     @patch("app.services.asc_ai._component_health", return_value={"status": "ok"})
-    def test_task_chatterbox_voice_overrides_stale_cloud_tts_provider(self, health):
+    def test_task_chatterbox_voice_overrides_stale_cloud_tts_provider(
+        self, health, _voice
+    ):
         config.ui["voice_mode"] = "tts"
         config.ui["tts_server"] = "azure-tts-v1"
         params = self.params(
             custom_audio_file="",
-            voice_name="chatterbox:default-Female",
+            voice_name="chatterbox:ru-default",
         )
 
         asc_ai.preflight(params, stop_at="video")
