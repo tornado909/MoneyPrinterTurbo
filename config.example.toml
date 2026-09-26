@@ -635,11 +635,20 @@ local_only = true
 prompt_intelligence_url = "http://127.0.0.1:8094"
 image_adapter_url = "http://127.0.0.1:8091"
 visual_analyzer_url = "http://127.0.0.1:8095"
+scheduler_url = "http://127.0.0.1:8090"
+prompt_llm_url = "http://127.0.0.1:8080"
 input_root = "/srv/ai-data/input"
 director_target_duration_seconds = 45
 director_scene_duration_seconds = 7
 director_max_local_video_scenes = 1
 director_timeout_seconds = 420
+director_admission_timeout_seconds = 300
+director_model_id = "qwen3-8b-q4km"
+director_model_name = "Qwen3-8B-Q4_K_M.gguf"
+director_vram_mb = 7600
+director_priority = 150
+director_temperature = 0.45
+director_max_tokens = 3500
 director_style = "cinematic documentary realism, clean composition"
 image_workflow_id = "lustify_krea_v10_native_int8.v1"
 image_model_id = "mdl_diffusion_model_0505412ed2ac"
@@ -655,9 +664,10 @@ generation_timeout_seconds = 1800
 qc_enabled = true
 qc_required = true
 qc_profile = "FAST"
-qc_min_semantic_score = 0.65
-qc_min_technical_score = 0.75
+# Visual Analyzer intentionally observes actual media and does not invent a
+# prompt-similarity score. QC gates on its sealed technical assessment.
 qc_max_image_regenerations = 1
+qc_upload_timeout_seconds = 120
 qc_timeout_seconds = 300
 
 # =============================================================================
