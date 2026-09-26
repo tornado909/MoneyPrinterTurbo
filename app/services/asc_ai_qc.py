@@ -102,8 +102,9 @@ def quality_control(
     profile: str = "FAST",
     upload_timeout: float = 120.0,
     timeout: float = 300.0,
+    run_visual_analysis: bool = True,
 ) -> dict[str, Any]:
-    """Use ASC-AI's real evidence contract; never fabricate prompt similarity."""
+    """Use bounded local QC without fabricating prompt similarity."""
     scene_id = str(scene.get("scene_id") or "scene")
     artifact = register_artifact(
         prompt_url,
@@ -112,6 +113,39 @@ def quality_control(
         scene_id=f"{scene_id}-{media_kind}",
         timeout=upload_timeout,
     )
+    if not run_visual_analysis:
+        if not Path(media_path).is_file() or Path(media_path).stat().st_size <= 0:
+            return {
+                "passed": False,
+                "technical_status": "missing_or_empty",
+                "technical_score": 0.0,
+                "semantic_score": None,
+                "observation_confidence": 1.0,
+                "issues": ["generated artifact is missing or empty"],
+                "retry_prompt": str(scene.get("visual_prompt") or "").strip(),
+                "provider": "local-structural",
+                "provider_model": None,
+                "artifact_id": artifact["artifact_id"],
+                "actual_image_spec": None,
+                "visual_analysis_skipped": True,
+                "skipped": False,
+            }
+        return {
+            "passed": True,
+            "technical_status": "trusted_adapter_output",
+            "technical_score": 1.0,
+            "semantic_score": None,
+            "observation_confidence": 1.0,
+            "issues": [],
+            "retry_prompt": "",
+            "provider": "local-structural",
+            "provider_model": None,
+            "artifact_id": artifact["artifact_id"],
+            "actual_image_spec": None,
+            "visual_analysis_skipped": True,
+            "skipped": False,
+        }
+
     result = analyze_evidence(
         visual_url,
         str(artifact["artifact_id"]),
@@ -146,5 +180,6 @@ def quality_control(
         "provider_model": result.get("provider_model"),
         "artifact_id": artifact["artifact_id"],
         "actual_image_spec": actual,
+        "visual_analysis_skipped": False,
         "skipped": False,
     }
