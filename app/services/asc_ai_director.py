@@ -55,6 +55,10 @@ class SchedulerManagedLocalLLM:
             method, self.scheduler_url + path, timeout=(3, 20), **kwargs
         )
 
+    def _gpu(self) -> dict:
+        result = self._scheduler("GET", "/api/v1/gpu")
+        return result if isinstance(result, dict) else {}
+
     @contextmanager
     def lease(self):
         identity = str(uuid.uuid4())
@@ -63,6 +67,8 @@ class SchedulerManagedLocalLLM:
         failure: BaseException | None = None
         stop = threading.Event()
         heartbeat_thread: threading.Thread | None = None
+        baseline_vram = 0
+        reclaimed = True
         try:
             created = self._scheduler(
                 "POST",
@@ -135,9 +141,11 @@ class SchedulerManagedLocalLLM:
                     break
                 if state in {"DENIED", "EXPIRED", "RELEASED"}:
                     raise DirectorError(f"Director lease became {state}")
-            if decision != "GRANTED":
+            if decision != "GRANTED" or not lease_id:
                 raise DirectorError("Director GPU admission timed out or was denied")
 
+            baseline = self._gpu()
+            baseline_vram = int(baseline.get("vram_used_mb") or 0)
             self._scheduler(
                 "POST",
                 f"/api/v1/leases/{lease_id}/heartbeat",
@@ -167,21 +175,41 @@ class SchedulerManagedLocalLLM:
             stop.set()
             if heartbeat_thread:
                 heartbeat_thread.join(timeout=2)
+
+            if lease_id and failure is None:
+                reclaimed = False
+                for _ in range(30):
+                    time.sleep(0.25)
+                    with suppress(Exception):
+                        current = self._gpu()
+                        current_vram = int(current.get("vram_used_mb") or 0)
+                        if current_vram <= baseline_vram + 384:
+                            reclaimed = True
+                            break
+
             if lease_id:
                 with suppress(Exception):
                     self._scheduler(
                         "POST", f"/api/v1/leases/{lease_id}/release", json={}
                     )
+
+            lifecycle_failure = failure is not None or not reclaimed
             if stage_id:
                 with suppress(Exception):
                     self._scheduler(
                         "POST",
                         f"/api/v1/stages/{stage_id}/transition",
                         json={
-                            "state": "FAILED" if failure else "COMPLETED",
-                            "error": type(failure).__name__ if failure else None,
+                            "state": "FAILED" if lifecycle_failure else "COMPLETED",
+                            "error": (
+                                type(failure).__name__
+                                if failure
+                                else (None if reclaimed else "VRAM reclaim was not verified")
+                            ),
                         },
                     )
+            if failure is None and not reclaimed:
+                raise DirectorError("Director local model VRAM reclaim was not verified")
 
     def chat(self, prompt: str, *, timeout: float, temperature: float, max_tokens: int) -> str:
         payload = {
