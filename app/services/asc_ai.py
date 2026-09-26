@@ -162,27 +162,64 @@ def _workflow_resolution(row: dict) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
-def health() -> dict:
-    return {
-        "scheduler": _request_json(
-            "GET", _scheduler_url() + "/health", timeout=(3, 10)
-        ),
-        "prompt_intelligence": _request_json(
-            "GET", _prompt_url() + "/health", timeout=(3, 10)
-        ),
-        "prompt_llm": _request_json(
-            "GET", _prompt_llm_url() + "/health", timeout=(3, 10)
-        ),
-        "image_adapter": _request_json(
-            "GET", _image_url() + "/health", timeout=(3, 10)
-        ),
-        "visual_analyzer": _request_json(
-            "GET", _visual_url() + "/health", timeout=(3, 10)
-        ),
-        "chatterbox_tts": _request_json(
-            "GET", _chatterbox_root_url() + "/health", timeout=(3, 10)
-        ),
-    }
+def _component_health(name: str, url: str) -> dict:
+    result = _request_json("GET", url, timeout=(3, 10))
+    status = str(result.get("status") or "").lower()
+    if status and status not in {"ok", "healthy", "ready", "running"}:
+        raise AscAIError(f"{name} is not ready: status={status}")
+    return result
+
+
+def health(params=None) -> dict:
+    """Check only dependencies required by the current local production path."""
+    director_enabled = (
+        bool(getattr(params, "director_enabled", True))
+        if params is not None
+        else True
+    )
+    video_source = (
+        str(getattr(params, "video_source", "asc_ai") or "asc_ai")
+        if params is not None
+        else "asc_ai"
+    )
+    voice_mode = str(config.ui.get("voice_mode", "tts") or "tts")
+    tts_server = str(config.ui.get("tts_server", "chatterbox") or "chatterbox")
+
+    checks: list[tuple[str, str]] = []
+    if director_enabled:
+        checks.extend(
+            [
+                ("scheduler", _scheduler_url() + "/health"),
+                ("prompt_llm", _prompt_llm_url() + "/health"),
+            ]
+        )
+    if video_source == "asc_ai":
+        checks.append(("image_adapter", _image_url() + "/health"))
+        if bool(_setting("qc_enabled", True)):
+            checks.extend(
+                [
+                    ("prompt_intelligence", _prompt_url() + "/health"),
+                    ("visual_analyzer", _visual_url() + "/health"),
+                ]
+            )
+    if voice_mode == "tts" and tts_server == "chatterbox":
+        checks.append(("chatterbox_tts", _chatterbox_root_url() + "/health"))
+
+    result = {}
+    seen = set()
+    for name, url in checks:
+        if name in seen:
+            continue
+        seen.add(name)
+        result[name] = _component_health(name, url)
+    return result
+
+
+def preflight(params) -> dict:
+    if not enabled():
+        return {}
+    validate_local_only(params)
+    return health(params)
 
 
 def validate_local_only(params) -> None:
