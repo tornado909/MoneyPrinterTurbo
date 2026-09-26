@@ -1,76 +1,144 @@
-# MoneyPrinterTurbo RU
+# MoneyPrinterTurbo RU + ASC-AI Director
 
-**Русскоязычная редакция [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo)** — генератора коротких видео по теме или сценарию: LLM → материалы → озвучка → субтитры → музыка → итоговый ролик.
+Русская редакция [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo), развиваемая как локальный AI production pipeline для ASC-AI.
+
+**Стандартный путь форка:**
+
+`тема / сценарий → Director → scene plan → Krea/Lustify → выборочные Wan I2V сцены → локальный QC → Chatterbox → Whisper → FFmpeg → готовый ролик`
 
 Русский | [English](README-en.md) | [日本語](README-ja.md) | [简体中文](README-upstream-zh.md) | [Upstream](https://github.com/harry0703/MoneyPrinterTurbo)
 
-> Форк сохраняет основной видеоконвейер и API upstream. Отличия сосредоточены на русской локализации, русских дефолтах, документации и проверках, которые не дают новым строкам интерфейса незаметно откатываться на английский.
+## Чем этот форк отличается
 
-## Что улучшено
+- **Полный русский WebUI:** русская локаль является primary edition и должна полностью покрывать английские UI-ключи.
+- **ASC-AI — источник по умолчанию:** `video_source = "asc_ai"`.
+- **Director по умолчанию:** локальный Qwen3-8B создаёт сценарий и production-ready scene plan.
+- **Никакого прямого ComfyUI:** изображения и I2V идут только через ASC-AI Image Adapter.
+- **GPU Scheduler обязателен:** Director получает lease перед локальным LLM inference; Krea/Lustify, Wan и Qwen3-VL используют существующий ASC-AI control plane.
+- **Строгий local-only:** облачные LLM/TTS/image/video/music providers и автоматическая сторонняя публикация блокируются в production-пути.
+- **Локальный QC:** Prompt Intelligence регистрирует артефакты, Visual Analyzer/Qwen3-VL анализирует фактический результат без выдуманного semantic score.
+- **Экономия GPU:** большая часть сцен может быть статичной генерацией + лёгким zoom/pan; число Wan I2V сцен задаётся Director budget.
+- **Production manifest:** для каждой задачи сохраняется `production-manifest.json` с попытками генерации, QC, fallback и фактическими выходами.
+- **Устойчивое ASC-AI-развёртывание:** production overlay включает Redis с AOF для очереди/состояний задач.
+- Китайский README upstream сохранён как `README-upstream-zh.md` для удобной синхронизации.
 
-- **Полный русский WebUI:** русский файл локализации покрывает все **570 из 570** ключей английского интерфейса.
-- Переведены новые разделы **LLM/TTS, VoxCPM, MuAPI, Metaso MiniMax, Shengsuan Cloud и AI Video/LoomLoom**.
-- **Русский язык интерфейса используется по умолчанию**, даже если браузер не прислал поддерживаемую locale.
-- В `config.example.toml` стартовый язык WebUI — `ru`.
-- Добавлены регрессионные проверки полноты русского перевода, форматных параметров вида `{amount}` / `{error}` и Markdown-ссылок.
-- Китайский README upstream сохранён как `README-upstream-zh.md`, чтобы форк было проще синхронизировать.
-- Основной видеоконвейер намеренно не переписан — обновления upstream должны переноситься с минимальным числом конфликтов.
+## Что нужно локально
 
-## Быстрый старт
+Для полного ASC-AI production режима должны быть доступны:
 
-### Windows
+- GPU Scheduler — `:8090`;
+- local Qwen / `prompt-llm-local` — внутренний `:8080`;
+- Image Adapter — `:8091`;
+- Prompt Intelligence — `:8094`;
+- Visual Analyzer — `:8095`;
+- локальный OpenAI-compatible Chatterbox TTS — host `:4123`;
+- FFmpeg;
+- faster-whisper;
+- общий каталог `/srv/ai-data`.
 
-```powershell
-git clone https://github.com/tornado909/MoneyPrinterTurbo.git
-cd MoneyPrinterTurbo
-webui.bat
-```
+MoneyPrinterTurbo сам GPU не получает.
 
-При первом запуске приложение создаёт локальный `config.toml` из примера. API-ключи храните только в локальном `config.toml` и не коммитьте их.
-
-### Linux / macOS
-
-```bash
-git clone https://github.com/tornado909/MoneyPrinterTurbo.git
-cd MoneyPrinterTurbo
-chmod +x webui.sh
-./webui.sh
-```
-
-### Docker
-
-Используйте штатные `docker-compose*.yml` из upstream. Перед запуском проверьте локальный `config.toml` и параметры выбранных провайдеров.
-
-## Русскоязычное видео
-
-1. Введите тему или готовый сценарий.
-2. Язык сценария можно оставить на автоопределении или выбрать `ru-RU`.
-3. Выберите LLM-провайдера.
-4. Выберите источник материалов: стоки, локальные файлы или поддерживаемая AI-генерация.
-5. Для бесплатной Edge TTS / Azure TTS V1 в проекте доступны русские голоса, включая `ru-RU-SvetlanaNeural` и `ru-RU-DmitryNeural`.
-6. Настройте субтитры, музыку и монтаж и запустите генерацию.
-
-## ASC-AI Production Pipeline
-
-Русская редакция по умолчанию ориентирована на полностью локальное производство:
-
-- локальный **Qwen Director** внутри ASC-AI Prompt Intelligence;
-- все GPU-задачи проходят через **GPU Scheduler**;
-- изображения создаёт **ASC-AI Image Adapter**, а не прямой вызов ComfyUI;
-- динамические hero-сцены могут использовать локальный **Wan I2V**;
-- русская озвучка — self-hosted **Chatterbox Multilingual**;
-- субтитры — локальный **faster-whisper**;
-- платные AI API в `local_only` режиме блокируются до начала задачи.
-
-Подробная схема и запуск: [docs/ASC_AI_INTEGRATION.md](docs/ASC_AI_INTEGRATION.md).
-
-## Проверка локализации
+## Запуск на ASC-AI
 
 ```bash
+git clone https://github.com/tornado909/MoneyPrinterTurbo.git
+cd MoneyPrinterTurbo
+cp config.example.toml config.toml
+
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.asc-ai.yml \
+  up -d --build
+```
+
+WebUI:
+
+```text
+http://127.0.0.1:8501
+```
+
+API:
+
+```text
+http://127.0.0.1:8080/docs
+```
+
+Перед первой генерацией в WebUI нажмите **«Проверить ASC-AI»**. Проверяются Scheduler, local Qwen, Image Adapter, Prompt Intelligence, Visual Analyzer и Chatterbox.
+
+Подробная архитектура и требования: [docs/ASC_AI_INTEGRATION.md](docs/ASC_AI_INTEGRATION.md).
+
+## Director
+
+В режиме **ASC-AI Director** доступны:
+
+- целевая длительность ролика;
+- максимальное число дорогих Wan I2V сцен;
+- общий визуальный стиль;
+- целевая аудитория;
+- цель ролика.
+
+Director возвращает структурированный план:
+
+```text
+script
+└── scenes[]
+    ├── narration
+    ├── duration_seconds
+    ├── visual_strategy: LOCAL_IMAGE | LOCAL_VIDEO
+    ├── visual_prompt
+    ├── motion_prompt
+    ├── transition
+    └── overlay_text
+```
+
+Если пользователь уже передал готовый сценарий, Director не переписывает его, а только строит визуальный production plan.
+
+## Local-only policy
+
+При `[asc_ai] local_only = true`:
+
+- нельзя случайно уйти в OpenAI/OpenRouter/Claude/Kimi и другие cloud LLM;
+- нельзя выбрать платный cloud video/image provider;
+- нельзя выбрать cloud TTS;
+- нельзя использовать удалённую AI-музыку;
+- Prompt Intelligence `/plans` не вызывается, потому что текущий ASC-AI router допускает внешний fallback;
+- если Director отключён, требуется готовый пользовательский сценарий.
+
+Допустимы локальные материалы и локальная музыка.
+
+## Локальная озвучка
+
+Форк рассчитан на self-hosted **Chatterbox Multilingual** через OpenAI-compatible API. В ASC-AI Docker overlay запросы по умолчанию идут на:
+
+```text
+http://host.docker.internal:4123/v1
+```
+
+Это сделано специально: TTS можно держать на CPU и не занимать VRAM, который нужен Director/Krea/Wan/Qwen3-VL.
+
+## Результаты задачи
+
+В каталоге задачи кроме обычных файлов появляются:
+
+- `director-plan.json` — решение Director;
+- `production-manifest.json` — фактическое выполнение сцен, QC, fallback и выходные материалы.
+
+Это позволяет разбирать проблемную сцену отдельно, а не гадать, почему итоговый ролик получился хуже ожидаемого.
+
+## Обычный запуск без ASC-AI
+
+Совместимость с upstream сохранена. Windows/Linux/macOS запуск через `webui.bat` / `webui.sh` остаётся возможным, но строгие ASC-AI local-only defaults рассчитаны прежде всего на ваш production host.
+
+## Тесты
+
+Основные проверки:
+
+```bash
+python -m unittest test.services.test_asc_ai
 python -m unittest test.services.test_webui_i18n
 ```
 
-Если upstream добавит новый английский UI-ключ без русского перевода, проверка намеренно завершится ошибкой.
+Русская локаль должна полностью покрывать английскую и сохранять все форматные placeholders и Markdown-ссылки.
 
 ## Синхронизация с upstream
 
@@ -80,10 +148,8 @@ git fetch upstream
 git merge upstream/main
 ```
 
-После merge снова запустите тест локализации и переведите новые ключи, если они появились.
-
-Подробнее о принципах форка: [docs/RUSSIAN_EDITION.md](docs/RUSSIAN_EDITION.md).
+После merge сначала запускайте ASC-AI и i18n regression tests.
 
 ## Лицензия и авторство
 
-Основано на проекте **MoneyPrinterTurbo** автора **harry0703** и распространяется на условиях исходного файла [LICENSE](LICENSE). Все права и атрибуция upstream сохраняются.
+Основано на **MoneyPrinterTurbo** автора **harry0703** и распространяется на условиях исходного [LICENSE](LICENSE). Атрибуция upstream сохраняется.
