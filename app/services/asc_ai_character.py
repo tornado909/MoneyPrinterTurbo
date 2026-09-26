@@ -32,10 +32,12 @@ def list_characters(base_url: str, *, timeout: float = 10.0) -> list[str]:
     if not isinstance(rows, list):
         raise CharacterHubError("Character Hub characters response is invalid")
     result: list[str] = []
-    for value in rows[:200]:
+    for value in rows[:1000]:
         item = str(value or "").strip()
         if item and len(item) <= 128 and item not in result:
             result.append(item)
+            if len(result) >= 200:
+                break
     return result
 
 
