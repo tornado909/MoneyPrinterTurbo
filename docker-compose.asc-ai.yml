@@ -11,6 +11,7 @@ x-asc-ai-env: &asc-ai-env
   MPT_CHATTERBOX_BASE_URL: http://chatterbox-tts:4123/v1
 
 x-asc-ai-volumes: &asc-ai-volumes
+  - ./:/MoneyPrinterTurbo
   - /srv/ai-data:/srv/ai-data
 
 services:
