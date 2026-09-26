@@ -1,4 +1,5 @@
 import re
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -38,17 +39,23 @@ class TestAscAIDeployment(unittest.TestCase):
         self.assertNotRegex(source, re.compile(r"\bgpus?:|runtime:\s*nvidia"))
 
     def test_russian_chatterbox_default_is_consistent(self):
-        config = (ROOT / "config.example.toml").read_text(encoding="utf-8")
+        config_text = (ROOT / "config.example.toml").read_text(encoding="utf-8")
+        config = tomllib.loads(config_text)
         voice = (ROOT / "app/services/voice.py").read_text(encoding="utf-8")
         controller = (
             ROOT / "app/controllers/v1/asc_ai.py"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('default_voice = "ru-default"', config)
-        self.assertIn('voice_name = "chatterbox:ru-default"', config)
+        self.assertEqual(config["chatterbox"]["default_voice"], "ru-default")
+        self.assertEqual(config["chatterbox"]["voices"], ["ru-default"])
+        self.assertNotIn("default_voice", config["kokoro"])
+        self.assertEqual(config["ui"]["voice_name"], "chatterbox:ru-default")
         self.assertIn('["chatterbox:ru-default"]', voice)
         self.assertIn("chatterbox:ru-default", controller)
-        self.assertNotIn("chatterbox:default-Female", config + voice + controller)
+        self.assertNotIn(
+            "chatterbox:default-Female",
+            config_text + voice + controller,
+        )
 
     def test_bootstrap_uploads_voice_with_russian_language_metadata(self):
         source = (
