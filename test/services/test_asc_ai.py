@@ -27,15 +27,31 @@ class TestAscAIIntegration(unittest.TestCase):
 
     def test_local_only_accepts_asc_ai_chatterbox_and_whisper(self):
         params = SimpleNamespace(
-            video_source="asc_ai", subtitle_enabled=True, bgm_type="random"
+            video_source="asc_ai",
+            director_enabled=True,
+            subtitle_enabled=True,
+            bgm_type="random",
         )
         asc_ai.validate_local_only(params)
 
     def test_local_only_rejects_cloud_video_source(self):
         params = SimpleNamespace(
-            video_source="ofox", subtitle_enabled=True, bgm_type="random"
+            video_source="ofox",
+            director_enabled=True,
+            subtitle_enabled=True,
+            bgm_type="random",
         )
         with self.assertRaisesRegex(asc_ai.AscAIError, "local-only"):
+            asc_ai.validate_local_only(params)
+
+    def test_local_only_requires_director_for_asc_ai_visuals(self):
+        params = SimpleNamespace(
+            video_source="asc_ai",
+            director_enabled=False,
+            subtitle_enabled=True,
+            bgm_type="random",
+        )
+        with self.assertRaisesRegex(asc_ai.AscAIError, "Director"):
             asc_ai.validate_local_only(params)
 
     def test_director_terms_keep_scene_order(self):
@@ -70,14 +86,14 @@ class TestAscAIIntegration(unittest.TestCase):
         with self.assertRaisesRegex(asc_ai.AscAIError, "local-only"):
             asc_ai.create_director_plan(params)
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
     @patch("app.services.asc_ai._request_json")
-    @patch("app.services.asc_ai.stage_for_qc", return_value="moneyprinterturbo/task/qc/scene.png")
-    def test_quality_control_requires_local_egress_contract(self, _stage, request_json):
+    @patch(
+        "app.services.asc_ai.stage_for_qc",
+        return_value="moneyprinterturbo/task/qc/scene.png",
+    )
+    def test_quality_control_requires_local_egress_contract(
+        self, _stage, request_json
+    ):
         request_json.return_value = {
             "external_egress": False,
             "provider": "local-qwen3-vl",
@@ -121,3 +137,7 @@ if __name__ == "__main__":
         row = asc_ai._video_binding()
         self.assertEqual(row["model_id"], "mdl_diffusion_model_runtime")
         self.assertEqual(row["defaults"]["length"], 89)
+
+
+if __name__ == "__main__":
+    unittest.main()
