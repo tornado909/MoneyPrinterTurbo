@@ -5192,6 +5192,76 @@ def _render_video_settings(panel, params):
                             )
                         )
 
+                    try:
+                        character_ids = _get_asc_ai_character_ids()
+                    except asc_ai.AscAIError as exc:
+                        character_ids = []
+                        st.warning(
+                            tr("Character Hub Unavailable").format(error=str(exc))
+                        )
+                    saved_character_id = str(
+                        config.ui.get(
+                            "director_character_id",
+                            getattr(params, "director_character_id", ""),
+                        )
+                        or ""
+                    )
+                    if saved_character_id and saved_character_id not in character_ids:
+                        character_ids = [saved_character_id, *character_ids]
+                    character_options = ["", *character_ids]
+                    params.director_character_id = stable_selectbox(
+                        tr("Director Character"),
+                        options=character_options,
+                        default_value=(
+                            saved_character_id
+                            if saved_character_id in character_options
+                            else ""
+                        ),
+                        key="director_character_id",
+                        format_func=lambda value: (
+                            tr("No Director Character") if not value else value
+                        ),
+                        help=tr("Director Character Help"),
+                    )
+                    _set_runtime_config(
+                        "ui",
+                        "director_character_id",
+                        params.director_character_id,
+                    )
+                    if params.director_character_id:
+                        try:
+                            character_identity = _get_asc_ai_character_identity(
+                                params.director_character_id
+                            )
+                            st.caption(
+                                tr("Director Character Summary").format(
+                                    name=character_identity.get("name")
+                                    or params.director_character_id,
+                                    kind=character_identity.get(
+                                        "visual_identity_kind"
+                                    )
+                                    or "PROMPT_ONLY",
+                                    refs=len(
+                                        character_identity.get(
+                                            "reference_artifact_ids"
+                                        )
+                                        or []
+                                    ),
+                                    loras=len(
+                                        character_identity.get(
+                                            "lora_resource_ids"
+                                        )
+                                        or []
+                                    ),
+                                )
+                            )
+                        except asc_ai.AscAIError as exc:
+                            st.warning(
+                                tr("Character Hub Unavailable").format(
+                                    error=str(exc)
+                                )
+                            )
+
                     params.director_style = st.text_input(
                         tr("Director Visual Style"),
                         value=str(
