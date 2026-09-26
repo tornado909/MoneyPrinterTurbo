@@ -245,7 +245,12 @@ def validate_local_only(params) -> None:
         raise AscAIError("ASC-AI visual source requires Director planning")
     voice_mode = str(config.ui.get("voice_mode", "tts") or "tts")
     tts_server = str(config.ui.get("tts_server", "chatterbox") or "chatterbox")
-    if voice_mode == "tts" and tts_server not in _LOCAL_TTS_SERVERS:
+    custom_audio = str(getattr(params, "custom_audio_file", "") or "").strip()
+    if (
+        not custom_audio
+        and voice_mode == "tts"
+        and tts_server not in _LOCAL_TTS_SERVERS
+    ):
         raise AscAIError(
             "local-only mode requires self-hosted Chatterbox TTS or uploaded/no voice"
         )
