@@ -2,14 +2,12 @@
 # Run:
 #   docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml up -d --build
 #
-# MoneyPrinterTurbo itself stays CPU-only. GPU neural work goes through ASC-AI.
+# MoneyPrinterTurbo itself stays CPU-only. All neural GPU work is delegated to
+# ASC-AI services that acquire GPU Scheduler leases.
 x-asc-ai-env: &asc-ai-env
-  ASC_AI_PROMPT_URL: http://host.docker.internal:8094
-  ASC_AI_IMAGE_ADAPTER_URL: http://host.docker.internal:8091
-  MPT_CHATTERBOX_BASE_URL: http://host.docker.internal:4123/v1
-
-x-asc-ai-host: &asc-ai-host
-  - "host.docker.internal:host-gateway"
+  ASC_AI_PROMPT_URL: http://prompt-intelligence:8094
+  ASC_AI_IMAGE_ADAPTER_URL: http://image-adapter:8091
+  MPT_CHATTERBOX_BASE_URL: http://chatterbox-tts:4123/v1
 
 x-asc-ai-volumes: &asc-ai-volumes
   - /srv/ai-data:/srv/ai-data
@@ -17,10 +15,19 @@ x-asc-ai-volumes: &asc-ai-volumes
 services:
   webui:
     environment: *asc-ai-env
-    extra_hosts: *asc-ai-host
     volumes: *asc-ai-volumes
+    networks:
+      - default
+      - asc-ai
 
   api:
     environment: *asc-ai-env
-    extra_hosts: *asc-ai-host
     volumes: *asc-ai-volumes
+    networks:
+      - default
+      - asc-ai
+
+networks:
+  asc-ai:
+    external: true
+    name: asc-ai-stack_default
