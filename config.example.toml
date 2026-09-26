@@ -644,11 +644,11 @@ image_workflow_id = "lustify_krea_v10_native_int8.v1"
 image_model_id = "mdl_diffusion_model_0505412ed2ac"
 image_steps = 8
 image_cfg = 1.0
-video_workflow_id = "wan22_ti2v_5b.v1"
-video_model_id = "mdl_diffusion_model_456f901338bd"
+video_workflow_id = "wan_i2v_default.v1"
+video_model_id = "mdl_diffusion_model_619a66032c28"
 video_profile = "STANDARD"
 video_duration_seconds = 5
-video_frames = 81
+video_frames = 89
 video_fallback_to_image = true
 generation_timeout_seconds = 1800
 
