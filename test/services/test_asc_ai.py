@@ -526,6 +526,56 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertEqual(result["scenes"][0]["duration_seconds"], 5)
         self.assertEqual(result["scenes"][1]["duration_seconds"], 5)
 
+    def test_retime_director_plan_fits_real_audio_without_extra_inference(self):
+        plan = {
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "duration_seconds": 5,
+                },
+                {
+                    "scene_id": "scene_02",
+                    "visual_strategy": "LOCAL_VIDEO",
+                    "duration_seconds": 5,
+                },
+                {
+                    "scene_id": "scene_03",
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "duration_seconds": 10,
+                },
+            ]
+        }
+
+        result = asc_ai.retime_director_plan(plan, 30.0)
+
+        self.assertEqual(
+            [row["duration_seconds"] for row in result["scenes"]],
+            [10, 5, 15],
+        )
+        self.assertEqual(result["timing"]["effective_scene_seconds"], 30)
+        self.assertTrue(result["timing"]["fully_matched"])
+        self.assertTrue(result["timing"]["retimed"])
+        self.assertEqual(
+            [row["planned_duration_seconds"] for row in result["scenes"]],
+            [5, 5, 10],
+        )
+
+    def test_retime_director_plan_reports_unreachable_audio_duration(self):
+        plan = {
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "visual_strategy": "LOCAL_VIDEO",
+                    "duration_seconds": 5,
+                }
+            ]
+        }
+        result = asc_ai.retime_director_plan(plan, 12.0)
+        self.assertEqual(result["scenes"][0]["duration_seconds"], 5)
+        self.assertFalse(result["timing"]["fully_matched"])
+        self.assertEqual(result["timing"]["feasible_max_seconds"], 5)
+
     @patch("app.services.asc_ai_qc.quality_control")
     def test_quality_control_uses_canonical_qc_module(self, qc):
         qc.return_value = {
