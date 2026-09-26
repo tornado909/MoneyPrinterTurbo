@@ -17,6 +17,7 @@ from app.models import const
 from app.models.schema import VideoConcatMode, VideoParams
 from app.services import bgm as bgm_service
 from app.services import (
+    asc_ai,
     elevenlabs_music,
     llm,
     loomloom,
@@ -651,7 +652,28 @@ def get_video_materials(
     video_terms,
     audio_duration,
     loomloom_video_request: loomloom.LoomLoomConfirmedVideoRequest | None = None,
+    director_plan: dict | None = None,
 ):
+    if params.video_source == "asc_ai":
+        if not director_plan:
+            _mark_task_failed(
+                task_id,
+                "materials",
+                "ASC-AI visual generation requires a Director plan",
+            )
+            return None
+        logger.info("\n\n## generating local visual materials with ASC-AI")
+        try:
+            return asc_ai.generate_scene_materials(
+                task_id=task_id,
+                plan=director_plan,
+                audio_duration=audio_duration,
+                aspect=params.video_aspect,
+                clip_duration=params.video_clip_duration,
+            )
+        except asc_ai.AscAIError as exc:
+            _mark_task_failed(task_id, "materials", str(exc))
+            return None
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         materials = video.preprocess_video(
@@ -1387,6 +1409,11 @@ def _run_pipeline(
     logger.info(f"start task: {task_id}, stop_at: {stop_at}")
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=5)
 
+    try:
+        asc_ai.validate_local_only(params)
+    except asc_ai.AscAIError as exc:
+        return _mark_task_failed(task_id, "preflight", str(exc))
+
     if (
         stop_at in {"materials", "video"}
         and params.video_source == "volcengine_seedance"
@@ -1497,8 +1524,17 @@ def _run_pipeline(
             "in config.toml to a working ffmpeg executable",
         )
 
-    # 1. Generate script
-    video_script = generate_script(task_id, params)
+    # 1. Director / script planning
+    director_plan = None
+    if getattr(params, "director_enabled", False):
+        try:
+            director_plan = asc_ai.create_director_plan(params)
+            asc_ai.persist_director_plan(task_id, director_plan)
+            video_script = str(director_plan.get("script") or "").strip()
+        except asc_ai.AscAIError as exc:
+            return _mark_task_failed(task_id, "director", str(exc))
+    else:
+        video_script = generate_script(task_id, params)
     if not video_script or "Error: " in video_script:
         error = (
             video_script.removeprefix("Error: ").strip()
@@ -1515,15 +1551,19 @@ def _run_pipeline(
         )
         return {"script": video_script}
 
-    # 2. Generate terms
+    # 2. Generate terms or reuse Director scene prompts.
     video_terms = ""
     if params.video_source != "local":
-        video_terms = generate_terms(task_id, params, video_script)
+        video_terms = (
+            asc_ai.director_terms(director_plan)
+            if director_plan
+            else generate_terms(task_id, params, video_script)
+        )
         if not video_terms:
             return _mark_task_failed(
                 task_id,
                 "terms",
-                "failed to generate video search terms",
+                "failed to prepare ordered visual prompts",
             )
 
     save_script_data(task_id, video_script, video_terms, params)
@@ -1593,6 +1633,7 @@ def _run_pipeline(
         video_terms,
         audio_duration,
         loomloom_video_request=loomloom_video_request,
+        director_plan=director_plan,
     )
     if not downloaded_videos:
         return _mark_task_failed(
