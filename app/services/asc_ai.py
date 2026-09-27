@@ -1145,6 +1145,9 @@ def acquire_public_scene_image(
             max_bytes=int(
                 _setting("public_media_max_bytes", 20 * 1024 * 1024)
             ),
+            allow_share_alike=bool(
+                _setting("public_media_allow_share_alike", False)
+            ),
         )
     except public_media.PublicMediaError as exc:
         raise AscAIError(str(exc)) from exc
