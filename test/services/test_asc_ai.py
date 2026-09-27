@@ -600,6 +600,68 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertTrue(parts[0].endswith("."))
         self.assertTrue(parts[1].endswith("."))
 
+    def test_director_public_image_budget_and_character_identity_are_fail_closed(self):
+        raw = {
+            "script": "Первая сцена. Вторая сцена. Третья сцена.",
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "narration": "Первая сцена.",
+                    "duration_seconds": 5,
+                    "visual_strategy": "PUBLIC_IMAGE",
+                    "visual_prompt": "real greenhouse exterior",
+                    "public_media_query": "modern greenhouse exterior",
+                },
+                {
+                    "scene_id": "scene_02",
+                    "narration": "Вторая сцена.",
+                    "duration_seconds": 5,
+                    "visual_strategy": "PUBLIC_IMAGE",
+                    "visual_prompt": "tomato plants",
+                    "public_media_query": "greenhouse tomato plants",
+                },
+                {
+                    "scene_id": "scene_03",
+                    "narration": "Третья сцена.",
+                    "duration_seconds": 5,
+                    "visual_strategy": "PUBLIC_IMAGE",
+                    "visual_prompt": "LED fixtures",
+                    "public_media_query": "horticulture LED lighting",
+                },
+            ],
+        }
+
+        limited = asc_ai_director._normalize(
+            raw,
+            self.params(director_max_public_image_scenes=2),
+        )
+        self.assertEqual(
+            [row["visual_strategy"] for row in limited["scenes"]],
+            ["PUBLIC_IMAGE", "PUBLIC_IMAGE", "LOCAL_IMAGE"],
+        )
+        self.assertEqual(
+            limited["scenes"][0]["public_media_query"],
+            "modern greenhouse exterior",
+        )
+        self.assertEqual(limited["scenes"][2]["public_media_query"], "")
+
+        character = asc_ai_director._normalize(
+            raw,
+            self.params(
+                director_max_public_image_scenes=3,
+                director_character_id="aria",
+            ),
+        )
+        self.assertTrue(
+            all(
+                row["visual_strategy"] == "LOCAL_IMAGE"
+                for row in character["scenes"]
+            )
+        )
+        self.assertTrue(
+            all(not row["public_media_query"] for row in character["scenes"])
+        )
+
     def test_director_schema_rejects_scene_narration_that_does_not_match_script(self):
         raw = {
             "script": "Первая часть. Вторая часть.",
