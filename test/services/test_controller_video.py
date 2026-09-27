@@ -216,7 +216,13 @@ class TestVideoControllerTasks(unittest.TestCase):
         self.assertEqual(response["status"], 200)
         self.assertEqual(response["data"]["task_id"], "task-123")
         self.assertEqual(response["data"]["request_id"], "request-123")
-        update_task.assert_called_once_with("task-123")
+        update_task.assert_called_once_with(
+            "task-123",
+            queue_executor="api",
+            retryable=False,
+            request_params={"video_subject": "Coffee"},
+            request_stop_at="audio",
+        )
         add_task.assert_called_once_with(
             video_controller.tm.start,
             task_id="task-123",
