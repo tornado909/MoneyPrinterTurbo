@@ -14,6 +14,7 @@ MoneyPrinterTurbo используется как production/editor слой, а
 8. QC использует sealed `technical_assessment`. Visual Analyzer намеренно не выдаёт выдуманный prompt-similarity score; для пропущенных still VLM-pass manifest явно фиксирует `visual_analysis_skipped=true`.
 9. Не прошедшее технический QC изображение получает новый idempotency key и реально перегенерируется. Перед Wan enqueue проверяется совместимость aspect ratio; несовместимая вертикальная сцена сразу уходит в still fallback без расхода GPU.
 10. MoneyPrinterTurbo собирает ролик MoviePy/FFmpeg, делает локальную озвучку и локальные Whisper-субтитры.
+11. Перед переводом задачи в `complete` итоговый MP4 проходит **Final QA**: CPU-проверку декодирования, размеров, длительности и аудиодорожки, затем по умолчанию один локальный Visual Analyzer pass. Результат сохраняется в `final-qc.json`; провал обязательного gate завершает задачу на `failed_stage=final_qc`, сохраняя готовый файл для диагностики и не запуская автоматический повторный render.
 
 ## Cost-aware public egress
 
@@ -26,7 +27,7 @@ Commons используется только для подходящих reusab
 
 ## Local-only policy
 
-При `asc_ai.local_only = true` production-путь работает fail-closed. По умолчанию это также **zero-public-egress**:
+При `asc_ai.local_only = true` AI production-путь работает fail-closed: inference и генерация не могут уйти во внешние AI-провайдеры. В этой cost-aware редакции bounded **не-AI public HTTP** к MediaWiki/Wikimedia Commons включён по умолчанию и независимо отключается глобально или на уровне задачи для приватных тем:
 
 - запрещены облачные/платные LLM;
 - запрещены облачные TTS;
@@ -34,7 +35,7 @@ Commons используется только для подходящих reusab
 - запрещены удалённые AI-music providers;
 - запрещён автоматический Upload-Post;
 - внутренние ASC-AI URL разрешены только для loopback/RFC1918/link-local, встроенных Docker service names, `*.local` или явного `local_service_hosts`;
-- Wikipedia research и Wikimedia visual search выключены, пока пользователь не разрешит их для конкретной задачи;
+- MediaWiki research и Wikimedia visual search допускаются только через встроенные bounded routers; их можно отключить для конкретной задачи без изменения local-only AI policy;
 - если Director выключен, для запуска без облачного LLM необходимо передать готовый сценарий.
 
 Разрешены GPU Scheduler, локальный Qwen3-8B Director, Prompt Intelligence, Image Adapter, Krea/Lustify, Wan, Visual Analyzer/Qwen3-VL, self-hosted Chatterbox, local faster-whisper и локальные пользовательские материалы.
@@ -121,7 +122,7 @@ Production endpoint делает полный local-only preflight и стави
 
 Task ID детерминирован от ключа, а canonical request fingerprint сохраняется атомарно через Redis/Memory state. Повтор того же ключа и payload не ставит вторую задачу; тот же ключ с другим payload получает HTTP 409.
 
-Никакой второй очереди или отдельного renderer lifecycle для ASC-AI API не создаётся.
+Никакой второй очереди или отдельного renderer lifecycle для ASC-AI API не создаётся. Structured evidence включает `director-plan.json`, `director-execution-plan.json`, `production-manifest.json`, `final-qc.json` и, когда применимо, `public-media-credits.json`.
 
 ### Recovery после рестарта
 
@@ -143,8 +144,9 @@ ASC-AI production использует Redis-backed API queue:
 - image → лёгкий zoom/pan в MoneyPrinterTurbo;
 - только выбранные Director сцены: Wan I2V;
 - Qwen3-VL используется adaptive: первый/каждый N-й still, Character Hub сцены, retries и все Wan-видео;
-- MediaWiki research — только при task-level opt-in; bounded public HTTP без AI API, результаты кэшируются на retry и при нехватке данных могут добираться из fallback-языка, source URLs остаются в provenance;
-- bounded Wikimedia Commons `PUBLIC_IMAGE` — отдельный task-level opt-in; сцены реально обходят локальную diffusion-генерацию, допускаются только editable/commercial-safe Public Domain, CC0, CC BY и CC BY-SA лицензии, NC/ND блокируются; при поисковой/QC ошибке сцена локально генерируется как fallback;
+- MediaWiki research включён как cost-aware default: bounded public HTTP без AI API, результаты кэшируются на retry и при нехватке данных могут добираться из fallback-языка; source URLs остаются в provenance, а private-task override полностью запрещает egress;
+- bounded Wikimedia Commons `PUBLIC_IMAGE` также включён как cost-aware default (не более двух сцен по умолчанию): сцены реально обходят локальную diffusion-генерацию, допускаются Public Domain, CC0 и CC BY; ShareAlike требует отдельного opt-in, NC/ND блокируются; при поисковой/QC ошибке сцена локально генерируется как fallback;
+- Final QA добавляет только одну локальную VLM-проверку на готовый output (если `final_qc_visual_analysis=true`); structural часть работает на CPU и не расходует GPU;
 - локальные LLM/VLM освобождают VRAM после inference согласно ASC-AI scheduler policy.
 
 Такой режим значительно дешевле по вычислениям, чем генерация всего ролика через I2V, но оставляет Director возможность выделять действительно важные динамические сцены.
