@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from types import SimpleNamespace
 from typing import Literal
+from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
@@ -12,10 +16,49 @@ from app.controllers.v1 import video as video_controller
 from app.controllers.v1.base import new_router
 from app.models.schema import TaskVideoRequest
 from app.services import asc_ai
+from app.services import state as sm
 from app.utils import utils
 
 
 router = new_router(dependencies=[Depends(base.verify_token)])
+
+
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+
+
+def _production_fingerprint(task_request: TaskVideoRequest) -> str:
+    payload = task_request.model_dump(mode="json")
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _production_task_id(idempotency_key: str) -> str:
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            "moneyprinterturbo:asc-ai:production:" + idempotency_key,
+        )
+    )
+
+
+def _idempotent_replay_or_conflict(
+    task_id: str,
+    fingerprint: str,
+):
+    existing = sm.state.get_task(task_id)
+    if not existing:
+        return None
+    if str(existing.get("request_fingerprint") or "") != fingerprint:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency-Key was already used with a different production payload",
+        )
+    return utils.get_response(200, {"task_id": task_id})
 
 
 class DirectorPlanRequest(BaseModel):
@@ -142,6 +185,7 @@ def capabilities(request: Request):
                 "task_status_template": "/api/v1/tasks/{task_id}",
                 "queued": True,
                 "uses_shared_task_manager": True,
+                "persistent_idempotency_header": "Idempotency-Key",
             },
             "artifacts": {
                 "director_plan": "director-plan.json",
@@ -213,14 +257,66 @@ def director_plan(request: Request, body: DirectorPlanRequest):
 )
 def production(request: Request, body: ProductionRequest):
     task_request = body.to_task_request()
+    idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
+
+    if idempotency_key and not _IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Idempotency-Key must be 8-128 characters using only "
+                "letters, digits, '.', '_', ':', or '-'"
+            ),
+        )
+
+    fingerprint = _production_fingerprint(task_request)
+    deterministic_task_id = (
+        _production_task_id(idempotency_key) if idempotency_key else None
+    )
+    if deterministic_task_id:
+        replay = _idempotent_replay_or_conflict(
+            deterministic_task_id,
+            fingerprint,
+        )
+        if replay is not None:
+            return replay
+
     try:
         # Fail before queueing when the local production dependencies are not
         # ready; the worker runs the same preflight again before execution.
         asc_ai.preflight(task_request, stop_at="video")
     except asc_ai.AscAIError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    if not deterministic_task_id:
+        return video_controller.create_task(
+            request,
+            task_request,
+            stop_at="video",
+        )
+
+    created = sm.state.create_task_if_absent(
+        deterministic_task_id,
+        queue_executor="api",
+        retryable=False,
+        request_fingerprint=fingerprint,
+        idempotency_scope="asc-ai-production",
+    )
+    if not created:
+        replay = _idempotent_replay_or_conflict(
+            deterministic_task_id,
+            fingerprint,
+        )
+        if replay is not None:
+            return replay
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency-Key claim could not be resolved",
+        )
+
     return video_controller.create_task(
         request,
         task_request,
         stop_at="video",
+        task_id_override=deterministic_task_id,
+        initial_state_claimed=True,
     )
