@@ -40,6 +40,11 @@ class TestAscAIController(unittest.TestCase):
             "enabled-cost-aware",
         )
         self.assertTrue(data["production"]["uses_shared_task_manager"])
+        self.assertTrue(data["director"]["public_research_default"])
+        self.assertTrue(data["image"]["public_media_default"])
+        self.assertTrue(data["production"]["final_qc_enabled"])
+        self.assertTrue(data["production"]["final_qc_required"])
+        self.assertTrue(data["production"]["final_qc_visual_analysis"])
         self.assertEqual(
             data["artifacts"]["evidence_template"],
             "/api/v1/asc-ai/production/{task_id}/evidence",
