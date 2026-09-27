@@ -1,3 +1,6 @@
+import json
+import tempfile
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -31,6 +34,10 @@ class TestAscAIController(unittest.TestCase):
             "/api/v1/asc-ai/production",
         )
         self.assertTrue(data["production"]["uses_shared_task_manager"])
+        self.assertEqual(
+            data["artifacts"]["evidence_template"],
+            "/api/v1/asc-ai/production/{task_id}/evidence",
+        )
 
     @patch.object(
         asc_ai_controller.asc_ai,
@@ -321,6 +328,92 @@ class TestAscAIController(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         preflight.assert_not_called()
         create_task.assert_not_called()
+
+    def test_production_evidence_returns_structured_available_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            task_dir = Path(temp_dir) / "task-1"
+            task_dir.mkdir()
+            (task_dir / "director-plan.json").write_text(
+                json.dumps({"schema_version": "mpt.director.v3"}),
+                encoding="utf-8",
+            )
+            (task_dir / "production-manifest.json").write_text(
+                json.dumps({"status": "complete", "outputs": ["final.mp4"]}),
+                encoding="utf-8",
+            )
+            with (
+                patch.object(
+                    asc_ai_controller.video_controller.sm.state,
+                    "get_task",
+                    return_value={
+                        "task_id": "task-1",
+                        "state": 4,
+                        "progress": 100,
+                    },
+                ),
+                patch.object(
+                    asc_ai_controller.utils,
+                    "task_dir",
+                    return_value=str(task_dir),
+                ),
+            ):
+                response = self.client.get(
+                    "/api/v1/asc-ai/production/task-1/evidence"
+                )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["task_id"], "task-1")
+        self.assertEqual(data["progress"], 100)
+        self.assertEqual(
+            data["artifacts"]["director_plan"]["schema_version"],
+            "mpt.director.v3",
+        )
+        self.assertEqual(
+            data["artifacts"]["production_manifest"]["status"],
+            "complete",
+        )
+        self.assertIsNone(data["artifacts"]["director_execution_plan"])
+        self.assertIsNone(data["artifacts"]["public_media_credits"])
+
+    def test_production_evidence_returns_404_for_unknown_task(self):
+        with patch.object(
+            asc_ai_controller.video_controller.sm.state,
+            "get_task",
+            return_value=None,
+        ):
+            response = self.client.get(
+                "/api/v1/asc-ai/production/missing/evidence"
+            )
+        self.assertEqual(response.status_code, 404)
+
+    def test_production_evidence_reports_corrupted_json_without_exposing_content(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            task_dir = Path(temp_dir) / "task-bad"
+            task_dir.mkdir()
+            (task_dir / "production-manifest.json").write_text(
+                "{broken-secret-json",
+                encoding="utf-8",
+            )
+            with (
+                patch.object(
+                    asc_ai_controller.video_controller.sm.state,
+                    "get_task",
+                    return_value={"task_id": "task-bad", "state": 4},
+                ),
+                patch.object(
+                    asc_ai_controller.utils,
+                    "task_dir",
+                    return_value=str(task_dir),
+                ),
+            ):
+                response = self.client.get(
+                    "/api/v1/asc-ai/production/task-bad/evidence"
+                )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("unreadable", response.json()["detail"])
+        self.assertNotIn("broken-secret-json", response.text)
 
     @patch.object(asc_ai_controller.video_controller, "create_task")
     @patch.object(asc_ai_controller.asc_ai, "preflight")
