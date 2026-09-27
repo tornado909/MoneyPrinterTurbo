@@ -1879,6 +1879,25 @@ def _run_pipeline(
             "failed to generate final video",
         )
 
+    final_qc = None
+    if director_plan:
+        try:
+            final_qc = asc_ai.final_quality_control(
+                task_id,
+                final_video_paths,
+                expected_duration=audio_duration,
+            )
+        except asc_ai.AscAIError as exc:
+            return _mark_task_failed(
+                task_id,
+                "final_qc",
+                str(exc),
+                details={
+                    "videos": final_video_paths,
+                    "combined_videos": combined_video_paths,
+                },
+            )
+
     logger.success(
         f"task {task_id} finished, generated {len(final_video_paths)} videos."
     )
@@ -1913,6 +1932,7 @@ def _run_pipeline(
         "cross_post_error": None,
         "cross_post_owner": _cross_post_process_owner if should_cross_post else None,
         "warnings": generation_warnings or None,
+        "final_qc": final_qc,
     }
     sm.state.update_task(
         task_id, state=const.TASK_STATE_COMPLETE, progress=100, **kwargs
