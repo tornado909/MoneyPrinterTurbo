@@ -39,6 +39,7 @@ class TestConfigPersistence:
         assert example_config["listen_port"] == 8080
         assert example_config["log_level"] == "DEBUG"
         assert app_config["video_source"] in {
+            "asc_ai",
             "pexels",
             "pixabay",
             "coverr",
@@ -51,6 +52,9 @@ class TestConfigPersistence:
         }
         assert "match_materials_to_script" in app_config
         assert app_config["script_generation_backend"] == "local"
+        assert app_config["llm_provider"] == "ollama"
+        assert example_config["asc_ai"]["enabled"] is True
+        assert example_config["asc_ai"]["local_only"] is True
         assert app_config["loomloom_api_token"] == ""
         assert app_config["loomloom_video_run_timeout_seconds"] == 1800
         assert app_config["volcengine_seedance_api_key"] == ""
