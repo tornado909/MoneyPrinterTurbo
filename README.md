@@ -51,7 +51,7 @@ cp config.example.toml config.toml
 
 # Production: используется образ форка из GHCR; пока он не опубликован,
 # Compose собирает тот же fork локально из текущего checkout.
-docker compose \
+MPT_BIND_HOST=0.0.0.0 docker compose \
   -f docker-compose.release.yml \
   -f docker-compose.asc-ai.yml \
   -f docker-compose.chatterbox.yml \
@@ -65,17 +65,19 @@ docker compose \
 bash scripts/bootstrap-chatterbox-ru-voice.sh /path/to/russian-reference.wav
 ```
 
-WebUI:
+WebUI (при `MPT_BIND_HOST=0.0.0.0`):
 
 ```text
-http://127.0.0.1:8501
+http://<ASC-AI-IP>:8501
 ```
 
 API:
 
 ```text
-http://127.0.0.1:8080/docs
+http://<ASC-AI-IP>:8080/docs
 ```
+
+Без `MPT_BIND_HOST` release-compose безопасно публикует эти порты только на `127.0.0.1`.
 
 Перед первой генерацией в WebUI нажмите **«Проверить ASC-AI»**. Проверяются Scheduler, local Qwen, Image Adapter, Prompt Intelligence, Visual Analyzer и Chatterbox.
 
