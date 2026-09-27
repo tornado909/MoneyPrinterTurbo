@@ -67,6 +67,14 @@ from app.services import version_checker
 from app.utils.logging_utils import configure_terminal_logger
 from app.utils import utils
 
+try:
+    webui_task.recover_interrupted_webui_tasks()
+except Exception as exc:
+    # Streamlit reruns after transient Redis failures. The recovery helper does
+    # not commit its one-shot guard until a successful scan, so a later rerun
+    # can retry without preventing the UI from opening for diagnostics.
+    logger.exception(f"WebUI startup task recovery failed: {exc}")
+
 st.set_page_config(
     page_title="MoneyPrinterTurbo RU",
     page_icon="🤖",
