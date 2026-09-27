@@ -57,6 +57,13 @@ class TestAscAIDeployment(unittest.TestCase):
             config_text + voice + controller,
         )
 
+    def test_public_egress_defaults_are_private(self):
+        config = tomllib.loads(
+            (ROOT / "config.example.toml").read_text(encoding="utf-8")
+        )
+        self.assertFalse(config["asc_ai"]["public_research_enabled"])
+        self.assertFalse(config["asc_ai"]["public_media_enabled"])
+
     def test_acceptance_full_render_is_bounded_and_local_only(self):
         source = (
             ROOT / "scripts/asc-ai-acceptance.sh"
@@ -64,6 +71,7 @@ class TestAscAIDeployment(unittest.TestCase):
         self.assertIn('"max_local_video_scenes": 0', source)
         self.assertIn('"max_public_image_scenes": 0', source)
         self.assertIn('"public_research_enabled": False', source)
+        self.assertIn('"public_media_enabled": False', source)
         self.assertIn('"bgm_type": ""', source)
         self.assertIn('if [[ "$state" == "1" ]]', source)
         self.assertIn('if [[ "$state" == "-1" ]]', source)
