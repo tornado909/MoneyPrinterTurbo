@@ -96,11 +96,11 @@ script
     ├── visual_strategy: LOCAL_IMAGE | LOCAL_VIDEO
     ├── visual_prompt
     ├── motion_prompt
-    ├── transition
-    └── overlay_text
+    ├── transition: cut | fade_* | slide_* | zoom_*
+    └── overlay_text: короткий экранный callout
 ```
 
-Если пользователь уже передал готовый сценарий, Director не переписывает его, а только строит визуальный production plan.
+Если пользователь уже передал готовый сценарий, Director не переписывает его, а только строит визуальный production plan. После готовой TTS-дорожки scene durations детерминированно подгоняются под фактическую длину озвучки без второго LLM-запроса. Переходы и короткие `overlay_text` callout'ы запекаются в scene clips перед финальной склейкой; ошибка такого post-process не уничтожает уже прошедший QC исходный кадр.
 
 ## Headless API для ASC-AI Agent
 
