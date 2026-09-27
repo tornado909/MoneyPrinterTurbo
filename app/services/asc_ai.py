@@ -12,7 +12,13 @@ import requests
 from loguru import logger
 
 from app.config import config
-from app.services import asc_ai_character, asc_ai_director, asc_ai_qc, video
+from app.services import (
+    asc_ai_character,
+    asc_ai_director,
+    asc_ai_qc,
+    public_media,
+    video,
+)
 from app.utils import utils
 
 
@@ -932,6 +938,42 @@ def generate_video_from_image(
     if return_execution:
         return output_path, _execution_provenance(result)
     return output_path
+
+
+def acquire_public_scene_image(
+    task_id: str,
+    scene: dict,
+    aspect: Any,
+) -> dict:
+    if not bool(_setting("public_media_enabled", True)):
+        raise AscAIError("public media routing is disabled")
+    query = str(scene.get("public_media_query") or "").strip()
+    if not query:
+        raise AscAIError("PUBLIC_IMAGE scene has no public_media_query")
+    aspect_value = str(getattr(aspect, "value", aspect) or "9:16")
+    try:
+        return public_media.acquire_commons_image(
+            query,
+            task_dir=utils.task_dir(task_id),
+            scene_id=str(scene.get("scene_id") or "scene"),
+            cache_dir=str(
+                _setting(
+                    "public_media_cache_dir",
+                    utils.storage_dir("public_media", create=True),
+                )
+            ),
+            aspect=aspect_value,
+            max_results=int(_setting("public_media_max_results", 6)),
+            timeout=float(_setting("public_media_timeout_seconds", 12)),
+            cache_ttl_seconds=float(
+                _setting("public_media_cache_ttl_seconds", 3600)
+            ),
+            max_bytes=int(
+                _setting("public_media_max_bytes", 20 * 1024 * 1024)
+            ),
+        )
+    except public_media.PublicMediaError as exc:
+        raise AscAIError(str(exc)) from exc
 
 
 def _image_vlm_required(
