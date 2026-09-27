@@ -535,12 +535,18 @@ def create_plan(
     scene_count = max(1, min(24, math.ceil(target / scene_seconds)))
     supplied_script = str(params.video_script or "").strip()
     language = (params.video_language or "ru-RU").split("-", 1)[0]
+    public_media_enabled = bool(settings.get("public_media_enabled", False))
+    public_media_budget = (
+        max(0, int(getattr(params, "director_max_public_image_scenes", 2)))
+        if public_media_enabled
+        else 0
+    )
 
     research_items = []
     research_enabled = bool(
         settings.get(
             "public_research_enabled",
-            settings.get("research_enabled", True),
+            settings.get("research_enabled", False),
         )
     )
     if research_enabled:
@@ -632,7 +638,7 @@ Audience: {getattr(params, 'director_audience', '')}
 Purpose: {getattr(params, 'director_purpose', '')}
 Visual style: {getattr(params, 'director_style', '') or settings.get('director_style', '')}
 Maximum LOCAL_VIDEO scenes: {getattr(params, 'director_max_local_video_scenes', 1)}
-Maximum PUBLIC_IMAGE scenes: {getattr(params, 'director_max_public_image_scenes', 2)}
+Maximum PUBLIC_IMAGE scenes: {public_media_budget}
 {character_context}
 {research_context}
 
@@ -694,13 +700,16 @@ on-screen callout materially improves the scene; when used, keep it concise
             previous_output = text
             raw = _extract_object(text)
             raw["research"] = research_items
-            return _normalize(
+            plan = _normalize(
                 raw,
                 params,
-                public_media_enabled=bool(
-                    settings.get("public_media_enabled", True)
-                ),
+                public_media_enabled=public_media_enabled,
             )
+            plan["public_egress"] = {
+                "research_enabled": research_enabled,
+                "media_enabled": public_media_enabled,
+            }
+            return plan
         except (DirectorError, ValueError, TypeError) as exc:
             last_error = exc
             if attempt == 0:
