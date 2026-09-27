@@ -679,6 +679,10 @@ public_media_max_results = 6
 public_media_timeout_seconds = 12
 public_media_cache_ttl_seconds = 3600
 public_media_max_bytes = 20971520
+# ShareAlike is valid for commercial reuse but adds obligations to derivatives.
+# Keep it OFF for the default monetizable pipeline; enable only when you intend
+# to comply with the corresponding CC BY-SA terms for the finished adaptation.
+public_media_allow_share_alike = false
 # Font used only for short Director overlay_text callouts baked into scene clips.
 director_overlay_font = "MicrosoftYaHeiBold.ttc"
 # Free public factual grounding. ON by default for cost-aware ASC-AI production.
