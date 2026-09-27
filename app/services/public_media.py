@@ -55,7 +55,20 @@ def _metadata_value(metadata: dict, key: str, *, max_chars: int = 2000) -> str:
 
 
 def _license_is_reusable(short_name: str) -> bool:
+    """Allow only licenses safe for edited/commercial video reuse.
+
+    Wikimedia's LicenseShortName can contain CC BY-NC / CC BY-ND variants.
+    A naive "cc by" substring check accepts both, which is unsafe for a video
+    pipeline that crops, zooms, composites and may later be monetized.
+    """
     normalized = re.sub(r"\s+", " ", str(short_name or "").lower()).strip()
+    if not normalized:
+        return False
+    if re.search(
+        r"(?:^|[-\s])(?:nc|nd)(?:[-\s]|$)|non[-\s]?commercial|no[-\s]?derivatives",
+        normalized,
+    ):
+        return False
     return any(marker in normalized for marker in _LICENSE_MARKERS)
 
 
