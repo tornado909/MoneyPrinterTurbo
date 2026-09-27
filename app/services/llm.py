@@ -295,6 +295,7 @@ def _generate_response(prompt: str, app_config=None) -> str:
                 admission_timeout=float(
                     config.asc_ai.get("director_admission_timeout_seconds", 300)
                 ),
+                allowed_hosts=config.asc_ai.get("local_service_hosts", []),
             )
             content = runtime.chat(
                 prompt,
