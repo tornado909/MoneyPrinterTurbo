@@ -129,6 +129,90 @@ class RedisTaskManager(TaskManager):
 
             return task_info
 
+    def _queued_task_ids(self) -> set[str]:
+        task_ids: set[str] = set()
+        for raw in self.redis_client.lrange(self.queue, 0, -1):
+            try:
+                item = json.loads(raw)
+                kwargs = item.get("kwargs") if isinstance(item, dict) else None
+                task_id = kwargs.get("task_id") if isinstance(kwargs, dict) else None
+                if isinstance(task_id, str) and task_id:
+                    task_ids.add(task_id)
+            except (TypeError, ValueError):
+                # dequeue() owns stale-payload handling and will drop malformed
+                # entries later. Recovery only needs trustworthy task ids.
+                continue
+        return task_ids
+
+    @staticmethod
+    def _decode(value):
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return value
+
+    def recover_startup(self) -> dict:
+        """Recover the dedicated API Redis executor after process restart.
+
+        Queued payloads remain in Redis and are resumed. An API task that is
+        still marked processing but no longer exists in the queue was already
+        popped by the previous process and therefore cannot be resumed safely;
+        it is made explicitly retryable instead of remaining stuck forever.
+        WebUI tasks are intentionally ignored because they use a separate
+        in-process executor.
+        """
+        queued_ids = self._queued_task_ids()
+        interrupted: list[str] = []
+        cursor = 0
+        while True:
+            cursor, keys = self.redis_client.scan(
+                cursor,
+                count=100,
+                _type="HASH",
+            )
+            for key in keys:
+                task_id = self._decode(self.redis_client.hget(key, "task_id"))
+                if not isinstance(task_id, str) or not task_id:
+                    continue
+                executor = self._decode(
+                    self.redis_client.hget(key, "queue_executor")
+                )
+                raw_state = self._decode(self.redis_client.hget(key, "state"))
+                try:
+                    state = int(raw_state)
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    executor == "api"
+                    and state == const.TASK_STATE_PROCESSING
+                    and task_id not in queued_ids
+                ):
+                    if sm.state.patch_task(
+                        task_id,
+                        state=const.TASK_STATE_FAILED,
+                        failed_stage="startup_recovery",
+                        error=(
+                            "API process restarted while this task was running; "
+                            "the interrupted task was not replayed automatically"
+                        ),
+                        retryable=True,
+                        recovery_action="resubmit",
+                    ):
+                        interrupted.append(task_id)
+            if cursor == 0:
+                break
+
+        resumed = self.resume_queued_tasks()
+        logger.info(
+            "Redis task recovery complete: "
+            f"queued={len(queued_ids)}, resumed={resumed}, "
+            f"interrupted={len(interrupted)}"
+        )
+        return {
+            "queued": len(queued_ids),
+            "resumed": resumed,
+            "interrupted": interrupted,
+        }
+
     def is_queue_empty(self):
         return self.redis_client.llen(self.queue) == 0
 
