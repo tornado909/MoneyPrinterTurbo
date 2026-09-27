@@ -324,47 +324,174 @@ class TestAscAIController(unittest.TestCase):
 
     @patch.object(asc_ai_controller.video_controller, "create_task")
     @patch.object(asc_ai_controller.asc_ai, "preflight")
-    def test_retry_production_reuses_durable_snapshot_and_links_tasks(
-        self, preflight, create_task
+    @patch.object(
+        asc_ai_controller,
+        "_production_fingerprint",
+        return_value="retry-fingerprint",
+    )
+    def test_retry_production_claims_deterministic_task_and_links_original(
+        self, _fingerprint, preflight, create_task
     ):
         previous_params = asc_ai_controller.ProductionRequest(
             video_subject="Теплица",
             public_research_enabled=False,
-        ).to_task_request().model_dump(warnings=False)
-        create_task.return_value = {
-            "status": 200,
-            "message": "success",
-            "data": {"task_id": "task-new"},
-        }
+        ).to_task_request().model_dump(mode="json", warnings=False)
+        retry_task_id = asc_ai_controller._retry_task_id("task-old")
+
+        def create_response(_request, _body, *, stop_at, **kwargs):
+            self.assertEqual(stop_at, "video")
+            return {
+                "status": 200,
+                "message": "success",
+                "data": {"task_id": kwargs["task_id_override"]},
+            }
+
+        create_task.side_effect = create_response
 
         with patch.object(asc_ai_controller.video_controller.sm, "state") as state:
-            state.get_task.return_value = {
-                "task_id": "task-old",
-                "retryable": True,
-                "request_params": previous_params,
-                "request_stop_at": "video",
-            }
+            state.get_task.side_effect = [
+                {
+                    "task_id": "task-old",
+                    "retryable": True,
+                    "request_params": previous_params,
+                    "request_stop_at": "video",
+                },
+                None,
+            ]
+            state.create_task_if_absent.return_value = True
             state.patch_task.return_value = True
             response = self.client.post(
                 "/api/v1/asc-ai/production/task-old/retry",
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["data"]["task_id"], "task-new")
+        self.assertEqual(response.json()["data"]["task_id"], retry_task_id)
         task_request = preflight.call_args.args[0]
         self.assertEqual(task_request.video_source, "asc_ai")
         self.assertFalse(task_request.director_public_research_enabled)
+        preflight.assert_called_once()
+        claim = state.create_task_if_absent.call_args
+        self.assertEqual(claim.args[0], retry_task_id)
+        self.assertEqual(claim.kwargs["request_fingerprint"], "retry-fingerprint")
+        self.assertEqual(claim.kwargs["idempotency_scope"], "asc-ai-retry")
+        self.assertEqual(claim.kwargs["retry_of"], "task-old")
+        self.assertEqual(claim.kwargs["request_stop_at"], "video")
+        self.assertEqual(claim.kwargs["request_params"]["video_source"], "asc_ai")
         create_task.assert_called_once()
         self.assertEqual(
-            create_task.call_args.kwargs["state_metadata"]["retry_of"],
-            "task-old",
+            create_task.call_args.kwargs["task_id_override"],
+            retry_task_id,
         )
+        self.assertTrue(create_task.call_args.kwargs["initial_state_claimed"])
         state.patch_task.assert_called_once_with(
             "task-old",
-            retried_as="task-new",
+            retried_as=retry_task_id,
             retryable=False,
             recovery_action="resubmitted",
         )
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    def test_retry_production_replays_existing_retried_as_without_new_work(
+        self, preflight, create_task
+    ):
+        with patch.object(asc_ai_controller.video_controller.sm, "state") as state:
+            state.get_task.return_value = {
+                "task_id": "task-old",
+                "retryable": False,
+                "retried_as": "task-existing",
+            }
+            response = self.client.post(
+                "/api/v1/asc-ai/production/task-old/retry",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["task_id"], "task-existing")
+        preflight.assert_not_called()
+        create_task.assert_not_called()
+        state.create_task_if_absent.assert_not_called()
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    @patch.object(
+        asc_ai_controller,
+        "_production_fingerprint",
+        return_value="retry-fingerprint",
+    )
+    def test_retry_production_lost_claim_race_becomes_replay(
+        self, _fingerprint, preflight, create_task
+    ):
+        previous_params = asc_ai_controller.ProductionRequest(
+            video_subject="Теплица",
+        ).to_task_request().model_dump(mode="json", warnings=False)
+        retry_task_id = asc_ai_controller._retry_task_id("task-old")
+        with patch.object(asc_ai_controller.video_controller.sm, "state") as state:
+            state.get_task.side_effect = [
+                {
+                    "task_id": "task-old",
+                    "retryable": True,
+                    "request_params": previous_params,
+                    "request_stop_at": "video",
+                },
+                None,
+                {
+                    "task_id": retry_task_id,
+                    "request_fingerprint": "retry-fingerprint",
+                },
+            ]
+            state.create_task_if_absent.return_value = False
+            state.patch_task.return_value = True
+            response = self.client.post(
+                "/api/v1/asc-ai/production/task-old/retry",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["task_id"], retry_task_id)
+        preflight.assert_called_once()
+        create_task.assert_not_called()
+        state.patch_task.assert_called_once_with(
+            "task-old",
+            retried_as=retry_task_id,
+            retryable=False,
+            recovery_action="resubmitted",
+        )
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    @patch.object(
+        asc_ai_controller,
+        "_production_fingerprint",
+        return_value="retry-fingerprint",
+    )
+    def test_retry_production_rejects_existing_retry_with_different_payload(
+        self, _fingerprint, preflight, create_task
+    ):
+        previous_params = asc_ai_controller.ProductionRequest(
+            video_subject="Теплица",
+        ).to_task_request().model_dump(mode="json", warnings=False)
+        retry_task_id = asc_ai_controller._retry_task_id("task-old")
+        with patch.object(asc_ai_controller.video_controller.sm, "state") as state:
+            state.get_task.side_effect = [
+                {
+                    "task_id": "task-old",
+                    "retryable": True,
+                    "request_params": previous_params,
+                    "request_stop_at": "video",
+                },
+                {
+                    "task_id": retry_task_id,
+                    "request_fingerprint": "different-fingerprint",
+                },
+            ]
+            response = self.client.post(
+                "/api/v1/asc-ai/production/task-old/retry",
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("different payload", response.json()["detail"])
+        preflight.assert_called_once()
+        create_task.assert_not_called()
+        state.create_task_if_absent.assert_not_called()
 
     @patch.object(asc_ai_controller.video_controller, "create_task")
     @patch.object(asc_ai_controller.asc_ai, "preflight")
