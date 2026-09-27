@@ -22,6 +22,8 @@ _task_manager = InMemoryTaskManager(
 )
 _task_logs: dict[str, deque[str]] = {}
 _task_logs_lock = threading.RLock()
+_startup_recovery_lock = threading.Lock()
+_startup_recovery_done = False
 _MAX_LOG_TASKS = 20
 _MAX_LOG_RECORDS_PER_TASK = 1000
 # Streamlit 无法由后台线程直接推送组件更新，只能通过 Fragment 轮询。0.5 秒
@@ -123,6 +125,54 @@ def _run_generation(
                 logger.debug(
                     f"WebUI task log handler already removed: task_id={task_id}"
                 )
+
+
+def recover_interrupted_webui_tasks() -> list[str]:
+    """Mark WebUI jobs lost by a previous Streamlit process as retryable.
+
+    The WebUI queue is intentionally in-memory because it can carry ephemeral
+    preview bytes that must never be persisted. Redis still stores task status,
+    so a process restart must explicitly close stale processing records.
+    """
+    global _startup_recovery_done
+    with _startup_recovery_lock:
+        if _startup_recovery_done:
+            return []
+        _startup_recovery_done = True
+
+    recovered: list[str] = []
+    page = 1
+    page_size = 200
+    while True:
+        tasks, total = sm.state.get_all_tasks(page, page_size)
+        for task in tasks:
+            if (
+                task.get("queue_executor") == "webui"
+                and task.get("state") == const.TASK_STATE_PROCESSING
+            ):
+                task_id = str(task.get("task_id") or "").strip()
+                if task_id and sm.state.patch_task(
+                    task_id,
+                    state=const.TASK_STATE_FAILED,
+                    failed_stage="webui_startup_recovery",
+                    error=(
+                        "WebUI process restarted while this task was running; "
+                        "ephemeral WebUI queue payload cannot be replayed safely"
+                    ),
+                    retryable=True,
+                    recovery_action="resubmit",
+                ):
+                    recovered.append(task_id)
+        if page * page_size >= total:
+            break
+        page += 1
+
+    if recovered:
+        logger.warning(
+            "recovered interrupted WebUI tasks after process restart: "
+            + ", ".join(recovered)
+        )
+    return recovered
 
 
 def submit_generation(
