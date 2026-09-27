@@ -657,6 +657,7 @@ def get_video_materials(
     audio_duration,
     loomloom_video_request: loomloom.LoomLoomConfirmedVideoRequest | None = None,
     director_plan: dict | None = None,
+    resume_from_task_id: str = "",
 ):
     if params.video_source == "asc_ai":
         if not director_plan:
@@ -674,6 +675,7 @@ def get_video_materials(
                 audio_duration=audio_duration,
                 aspect=params.video_aspect,
                 clip_duration=params.video_clip_duration,
+                resume_from_task_id=resume_from_task_id,
             )
         except asc_ai.AscAIError as exc:
             _mark_task_failed(task_id, "materials", str(exc))
@@ -1787,6 +1789,7 @@ def _run_pipeline(
         audio_duration,
         loomloom_video_request=loomloom_video_request,
         director_plan=director_plan,
+        resume_from_task_id=retry_source_task_id,
     )
     if not downloaded_videos:
         return _mark_task_failed(
