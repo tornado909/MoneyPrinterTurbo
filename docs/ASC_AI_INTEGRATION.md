@@ -103,6 +103,12 @@ Production endpoint делает полный local-only preflight и стави
 
     GET /api/v1/tasks/{task_id}
 
+Для безопасных agent retries используйте:
+
+    Idempotency-Key: <stable-key-8-to-128-chars>
+
+Task ID детерминирован от ключа, а canonical request fingerprint сохраняется атомарно через Redis/Memory state. Повтор того же ключа и payload не ставит вторую задачу; тот же ключ с другим payload получает HTTP 409.
+
 Никакой второй очереди или отдельного renderer lifecycle для ASC-AI API не создаётся.
 
 ## Экономия GPU
