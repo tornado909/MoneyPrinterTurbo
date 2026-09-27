@@ -2,6 +2,7 @@ import json
 import math
 import os
 import re
+import shutil
 import socket
 import threading
 import time
@@ -1396,6 +1397,93 @@ def _schedule_cross_post(
         return f"failed to schedule cross-post: {exc}"
 
     return None
+
+
+def _retry_source_task_id(task_id: str) -> str:
+    try:
+        state = sm.state.get_task(task_id) or {}
+    except Exception:
+        return ""
+    source = str(state.get("retry_of") or "").strip()
+    return source if source and source != task_id else ""
+
+
+def _copy_retry_task_file(
+    source_task_id: str,
+    target_task_id: str,
+    filename: str,
+) -> str:
+    source_root = path.realpath(utils.task_dir(source_task_id))
+    target_root = path.realpath(utils.task_dir(target_task_id))
+    source = file_security.resolve_path_within_directory(source_root, filename)
+    if not path.isfile(source):
+        return ""
+    target = path.realpath(path.join(target_root, path.basename(filename)))
+    file_security.resolve_path_within_directory(target_root, target)
+    os.makedirs(path.dirname(target), exist_ok=True)
+    if path.exists(target):
+        os.unlink(target)
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+    return target
+
+
+def _reuse_retry_audio(source_task_id: str, target_task_id: str):
+    for filename in ("audio.wav", "audio.mp3"):
+        try:
+            target = _copy_retry_task_file(
+                source_task_id,
+                target_task_id,
+                filename,
+            )
+        except (OSError, ValueError):
+            continue
+        if not target:
+            continue
+        duration = voice.get_audio_duration(target)
+        if duration and math.isfinite(duration) and duration > 0:
+            logger.info(
+                f"reusing narration audio from interrupted task: "
+                f"source={source_task_id}, target={target_task_id}"
+            )
+            return target, math.ceil(duration), None
+        try:
+            os.unlink(target)
+        except OSError:
+            pass
+    return None
+
+
+def _reuse_retry_subtitle(
+    source_task_id: str,
+    target_task_id: str,
+    *,
+    enabled: bool,
+) -> str:
+    if not enabled:
+        return ""
+    try:
+        target = _copy_retry_task_file(
+            source_task_id,
+            target_task_id,
+            "subtitle.srt",
+        )
+    except (OSError, ValueError):
+        return ""
+    if target and subtitle.file_to_subtitles(target):
+        logger.info(
+            f"reusing subtitles from interrupted task: "
+            f"source={source_task_id}, target={target_task_id}"
+        )
+        return target
+    if target:
+        try:
+            os.unlink(target)
+        except OSError:
+            pass
+    return ""
 
 
 def _run_pipeline(
