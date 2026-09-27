@@ -448,6 +448,50 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertEqual(result, plan)
         request_json.assert_not_called()
 
+    def test_local_runtime_url_allowlist_is_exact(self):
+        allowed = ["llm.internal.example"]
+        self.assertEqual(
+            asc_ai_director._assert_local_runtime_url(
+                "prompt_llm_url",
+                "http://llm.internal.example:8080",
+                allowed,
+            ),
+            "http://llm.internal.example:8080",
+        )
+        with self.assertRaisesRegex(
+            asc_ai_director.DirectorError,
+            "blocks external",
+        ):
+            asc_ai_director._assert_local_runtime_url(
+                "prompt_llm_url",
+                "https://api.openai.com/v1",
+                allowed,
+            )
+        with self.assertRaisesRegex(
+            asc_ai_director.DirectorError,
+            "blocks external",
+        ):
+            asc_ai_director._assert_local_runtime_url(
+                "prompt_llm_url",
+                "http://evil.llm.internal.example:8080",
+                allowed,
+            )
+
+    def test_local_runtime_host_parser_rejects_urls_and_bad_entries(self):
+        parsed = asc_ai_director._normalized_allowed_hosts(
+            [
+                "llm.internal",
+                "http://bad.example",
+                "bad host",
+                "",
+                "UPPER.INTERNAL",
+            ]
+        )
+        self.assertEqual(
+            parsed,
+            {"llm.internal", "upper.internal"},
+        )
+
     @patch("app.services.asc_ai_director.SchedulerManagedLocalLLM")
     @patch("app.services.asc_ai_director.local_research.wikipedia_research")
     def test_director_research_keeps_sources_in_provenance_not_qwen_prompt(
