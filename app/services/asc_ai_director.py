@@ -285,6 +285,77 @@ class SchedulerManagedLocalLLM:
         return str((choices[0].get("message") or {}).get("content") or "")
 
 
+def _partition_script_verbatim(script: str, weights: list[int]) -> list[str]:
+    """Split an existing script contiguously without changing any words.
+
+    Qwen supplies scene structure and approximate narration lengths, but an
+    uploaded/user script remains authoritative. Boundaries prefer punctuation
+    and whitespace near the weighted target positions.
+    """
+    text = str(script or "").strip()
+    count = max(1, len(weights))
+    if count == 1:
+        return [text]
+    if len(re.sub(r"\s+", "", text)) < count:
+        raise DirectorError(
+            "user-provided script is too short for the requested scene count"
+        )
+
+    normalized_weights = [max(1, int(value or 1)) for value in weights]
+    total_weight = float(sum(normalized_weights))
+    candidates = []
+    strong = set(".!?…。！？;；:：,，、\n")
+    for index in range(1, len(text)):
+        left = text[index - 1]
+        right = text[index]
+        if left in strong:
+            candidates.append((index, 0))
+        elif left.isspace() or right.isspace():
+            candidates.append((index, 1))
+
+    boundaries = []
+    previous = 0
+    consumed_weight = 0
+    for part_index in range(count - 1):
+        consumed_weight += normalized_weights[part_index]
+        target = round(len(text) * consumed_weight / total_weight)
+        remaining_parts = count - part_index - 1
+        minimum = previous + 1
+        maximum = len(text) - remaining_parts
+        target = max(minimum, min(maximum, target))
+
+        allowed = [
+            (position, quality)
+            for position, quality in candidates
+            if minimum <= position <= maximum
+        ]
+        if allowed:
+            position, _ = min(
+                allowed,
+                key=lambda item: (
+                    abs(item[0] - target),
+                    item[1],
+                    item[0],
+                ),
+            )
+        else:
+            position = target
+        boundaries.append(position)
+        previous = position
+
+    pieces = []
+    start = 0
+    for end in [*boundaries, len(text)]:
+        piece = text[start:end].strip()
+        if not piece:
+            raise DirectorError(
+                "could not create non-empty verbatim scene narration"
+            )
+        pieces.append(piece)
+        start = end
+    return pieces
+
+
 def _extract_object(text: str) -> dict:
     value = str(text or "").strip()
     if value.startswith("```"):
@@ -325,16 +396,26 @@ def _normalize(
             )
         ) from exc
 
-    script_compact = re.sub(r"\s+", "", candidate.script)
-    narration_compact = "".join(
-        re.sub(r"\s+", "", row.narration)
-        for row in candidate.scenes
-    )
-    if narration_compact != script_compact:
-        raise DirectorError(
-            "Director scene narrations must partition the script verbatim and "
-            "in order; concatenated scene narration does not match script"
+    if supplied_script:
+        verbatim_narrations = _partition_script_verbatim(
+            supplied_script,
+            [
+                len(re.sub(r"\s+", "", row.narration)) or 1
+                for row in candidate.scenes
+            ],
         )
+    else:
+        script_compact = re.sub(r"\s+", "", candidate.script)
+        narration_compact = "".join(
+            re.sub(r"\s+", "", row.narration)
+            for row in candidate.scenes
+        )
+        if narration_compact != script_compact:
+            raise DirectorError(
+                "Director scene narrations must partition the script verbatim and "
+                "in order; concatenated scene narration does not match script"
+            )
+        verbatim_narrations = [row.narration for row in candidate.scenes]
 
     max_video = max(
         0, int(getattr(params, "director_max_local_video_scenes", 1))
@@ -352,6 +433,7 @@ def _normalize(
     scenes = []
     for index, row in enumerate(candidate.scenes, start=1):
         strategy = row.visual_strategy
+        narration = verbatim_narrations[index - 1]
         public_query = row.public_media_query.strip()
         if strategy == "LOCAL_VIDEO":
             if used_video < max_video:
@@ -370,7 +452,7 @@ def _normalize(
         scenes.append(
             {
                 "scene_id": row.scene_id or f"scene_{index:02d}",
-                "narration": row.narration,
+                "narration": narration,
                 "duration_seconds": effective_duration,
                 "visual_strategy": strategy,
                 "visual_prompt": row.visual_prompt.strip(),
