@@ -95,24 +95,29 @@ class TaskManager:
         finally:
             self.task_done()
 
-    def check_queue(self):
+    def resume_queued_tasks(self) -> int:
+        """Start as many queued tasks as current concurrency allows.
+
+        This is used both after a worker completes and during startup recovery.
+        The old implementation started at most one queued item, which meant a
+        persisted Redis queue could stay dormant after process restart.
+        """
+        started = 0
         with self.lock:
-            if (
+            while (
                 self.current_tasks < self.max_concurrent_tasks
                 and not self.is_queue_empty()
             ):
                 task_info = self.dequeue()
                 if task_info is None:
-                    # dequeue() may skip and discard queue entries that no longer
-                    # pass current validation (see RedisTaskManager.dequeue) and
-                    # return None once nothing usable is left, even though
-                    # is_queue_empty() was False a moment earlier.
-                    return
+                    # dequeue() may discard stale entries. If nothing usable is
+                    # left, stop instead of spinning while the queue changes.
+                    if self.is_queue_empty():
+                        break
+                    continue
                 func = task_info["func"]
                 args = task_info.get("args", ())
                 kwargs = task_info.get("kwargs", {})
-                # 与直接创建任务保持同一计数时机，避免刚出队的任务尚未在线程
-                # 内计数时，又有新请求绕过队列占用同一个并发名额。
                 self.current_tasks += 1
                 try:
                     self.execute_task(func, *args, **kwargs)
@@ -120,11 +125,16 @@ class TaskManager:
                     self.current_tasks -= 1
                     self.enqueue(task_info)
                     raise
+                started += 1
+        return started
+
+    def check_queue(self):
+        return self.resume_queued_tasks()
 
     def task_done(self):
         with self.lock:
             self.current_tasks -= 1
-        self.check_queue()
+        self.resume_queued_tasks()
 
     def enqueue(self, task: Dict):
         raise NotImplementedError()
