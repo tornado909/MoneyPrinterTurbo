@@ -222,7 +222,11 @@ def create_task(
             "request_id": request_id,
             "params": body.model_dump(),
         }
-        sm.state.update_task(task_id)
+        sm.state.update_task(
+            task_id,
+            queue_executor="api",
+            retryable=False,
+        )
         try:
             task_manager.add_task(
                 tm.start, task_id=task_id, params=body, stop_at=stop_at
