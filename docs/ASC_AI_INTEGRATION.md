@@ -96,6 +96,7 @@ MoneyPrinterTurbo публикует отдельный authenticated namespace 
     GET  /api/v1/asc-ai/characters/{character_id}
     POST /api/v1/asc-ai/director/plan
     POST /api/v1/asc-ai/production
+    POST /api/v1/asc-ai/production/{task_id}/retry
 
 Director preview является planning-only: Scheduler/Qwen/Character Hub/research разрешены, но Image Adapter/Wan не запускаются.
 
@@ -119,6 +120,7 @@ Task ID детерминирован от ключа, а canonical request finge
 - только выбранные Director сцены: Wan I2V;
 - Qwen3-VL используется adaptive: первый/каждый N-й still, Character Hub сцены, retries и все Wan-видео;
 - MediaWiki research — bounded public HTTP без AI API; результаты кэшируются на retry и при нехватке данных могут добираться из fallback-языка, source URLs остаются в provenance;
+- bounded Wikimedia Commons `PUBLIC_IMAGE` сцены реально обходят локальную diffusion-генерацию; допускаются только editable/commercial-safe Public Domain, CC0, CC BY и CC BY-SA лицензии, а NC/ND блокируются; при поисковой/QC ошибке сцена локально генерируется как fallback;
 - локальные LLM/VLM освобождают VRAM после inference согласно ASC-AI scheduler policy.
 
 Такой режим значительно дешевле по вычислениям, чем генерация всего ролика через I2V, но оставляет Director возможность выделять действительно важные динамические сцены.
