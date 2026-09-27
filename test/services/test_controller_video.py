@@ -223,6 +223,7 @@ class TestVideoControllerTasks(unittest.TestCase):
             request_params={"video_subject": "Coffee"},
             request_stop_at="audio",
         )
+        body.model_dump.assert_any_call(mode="json", warnings=False)
         add_task.assert_called_once_with(
             video_controller.tm.start,
             task_id="task-123",
