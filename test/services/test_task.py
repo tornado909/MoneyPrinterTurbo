@@ -1104,6 +1104,7 @@ class TestTaskService(unittest.TestCase):
             audio_file=audio_file,
             subtitle_file=subtitle_path,
             word_level=False,
+            language=params.video_language,
         )
         correct.assert_called_once_with(
             subtitle_file=subtitle_path, video_script="Hello world."
@@ -1161,6 +1162,7 @@ class TestTaskService(unittest.TestCase):
             audio_file=audio_file,
             subtitle_file=subtitle_path,
             word_level=True,
+            language=params.video_language,
         )
         correct.assert_not_called()
 
