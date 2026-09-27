@@ -593,6 +593,9 @@
     "Character Hub Unavailable": "Character Hub недоступен: {error}",
     "Local AI Runtime": "Локальный AI Runtime",
     "Local AI Runtime Help": "Включён строгий local-only режим. Вся генерация текста идёт в локальный Qwen через GPU Scheduler ASC-AI; ключи облачных LLM не используются.",
-    "Local AI Scheduler Help": "Допуск к GPU и жизненный цикл модели контролирует ASC-AI Scheduler: {scheduler}"
+    "Local AI Scheduler Help": "Допуск к GPU и жизненный цикл модели контролирует ASC-AI Scheduler: {scheduler}",
+    "Local Production Stack": "Локальный production stack",
+    "Cloud APIs Disabled": "Облачные AI API отключены строгим local-only режимом.",
+    "Local Production Stack Help": "MoneyPrinterTurbo использует для AI-генерации только локальный control plane ASC-AI. Ключи облачных AI-сервисов для этого production-пути не требуются."
   }
 }
