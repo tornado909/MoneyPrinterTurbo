@@ -669,66 +669,35 @@ class TestAscAIController(unittest.TestCase):
         preflight.assert_called_once()
         create_task.assert_not_called()
 
-    @patch.object(asc_ai_controller.video_controller, "create_task")
-    @patch.object(asc_ai_controller.asc_ai, "preflight")
-    def test_retry_interrupted_production_is_idempotent(
-        self, preflight, create_task
-    ):
-        state = MemoryState()
-        request_params = asc_ai_controller.ProductionRequest(
-            video_subject="Теплица",
-            public_research_enabled=False,
-        ).to_task_request().model_dump(mode="json", warnings=False)
-        state.update_task(
-            "interrupted-task",
-            state=const.TASK_STATE_FAILED,
-            progress=35,
-            retryable=True,
-            failed_stage="startup_recovery",
-            request_params=request_params,
-            request_stop_at="video",
-            recovery_generation=0,
-        )
-        create_task.return_value = {
+    @patch.object(
+        asc_ai_controller,
+        "retry_production",
+        return_value={
             "status": 200,
             "message": "success",
-            "data": {"task_id": "child"},
-        }
-
-        with patch.object(asc_ai_controller.sm, "state", state):
-            first = self.client.post(
-                "/api/v1/asc-ai/tasks/interrupted-task/retry"
-            )
-            second = self.client.post(
-                "/api/v1/asc-ai/tasks/interrupted-task/retry"
-            )
+            "data": {"task_id": "canonical-retry"},
+        },
+    )
+    def test_legacy_retry_route_forwards_to_canonical_handler(self, retry):
+        first = self.client.post(
+            "/api/v1/asc-ai/tasks/interrupted-task/retry"
+        )
+        second = self.client.post(
+            "/api/v1/asc-ai/tasks/interrupted-task/retry"
+        )
 
         self.assertEqual(first.status_code, 200)
-        retry_id = first.json()["data"]["task_id"]
-        self.assertEqual(second.status_code, 200)
-        self.assertEqual(second.json()["data"]["task_id"], retry_id)
-        self.assertTrue(second.json()["data"]["already_created"])
-        create_task.assert_called_once()
-        preflight.assert_called_once()
-        child = state.get_task(retry_id)
-        self.assertEqual(child["retry_of"], "interrupted-task")
-        self.assertEqual(child["recovery_generation"], 1)
-        self.assertEqual(child["request_params"], request_params)
-
-    def test_retry_rejects_non_retryable_task(self):
-        state = MemoryState()
-        state.update_task(
-            "complete-task",
-            state=const.TASK_STATE_COMPLETE,
-            progress=100,
-            retryable=False,
+        self.assertEqual(
+            first.json()["data"]["task_id"],
+            "canonical-retry",
         )
-        with patch.object(asc_ai_controller.sm, "state", state):
-            response = self.client.post(
-                "/api/v1/asc-ai/tasks/complete-task/retry"
-            )
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("not marked retryable", response.json()["detail"])
+        self.assertEqual(
+            second.json()["data"]["task_id"],
+            "canonical-retry",
+        )
+        self.assertEqual(retry.call_count, 2)
+        for call in retry.call_args_list:
+            self.assertEqual(call.args[1], "interrupted-task")
 
     def test_production_request_rejects_preset_without_local_filename(self):
         response = self.client.post(
