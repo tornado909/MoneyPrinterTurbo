@@ -25,8 +25,13 @@ class DirectorSceneCandidate(BaseModel):
     scene_id: str = Field(default="", max_length=100)
     narration: str = Field(min_length=1, max_length=6000)
     duration_seconds: int = Field(default=7, ge=2, le=15)
-    visual_strategy: Literal["LOCAL_IMAGE", "LOCAL_VIDEO"] = "LOCAL_IMAGE"
+    visual_strategy: Literal[
+        "LOCAL_IMAGE",
+        "LOCAL_VIDEO",
+        "PUBLIC_IMAGE",
+    ] = "LOCAL_IMAGE"
     visual_prompt: str = Field(min_length=1, max_length=6000)
+    public_media_query: str = Field(default="", max_length=300)
     motion_prompt: str = Field(default="", max_length=3000)
     transition: Literal[
         "cut",
@@ -329,14 +334,31 @@ def _normalize(raw: dict, params) -> dict:
     max_video = max(
         0, int(getattr(params, "director_max_local_video_scenes", 1))
     )
+    max_public = max(
+        0, int(getattr(params, "director_max_public_image_scenes", 2))
+    )
     used_video = 0
+    used_public = 0
+    has_character = bool(
+        str(getattr(params, "director_character_id", "") or "").strip()
+    )
     scenes = []
     for index, row in enumerate(candidate.scenes, start=1):
         strategy = row.visual_strategy
-        if strategy == "LOCAL_VIDEO" and used_video < max_video:
-            used_video += 1
-        else:
-            strategy = "LOCAL_IMAGE"
+        public_query = row.public_media_query.strip()
+        if strategy == "LOCAL_VIDEO":
+            if used_video < max_video:
+                used_video += 1
+            else:
+                strategy = "LOCAL_IMAGE"
+        elif strategy == "PUBLIC_IMAGE":
+            # A custom Character Hub identity must never be substituted with an
+            # unrelated public photograph.
+            if has_character or used_public >= max_public or not public_query:
+                strategy = "LOCAL_IMAGE"
+                public_query = ""
+            else:
+                used_public += 1
         effective_duration = row.duration_seconds
         scenes.append(
             {
@@ -345,6 +367,7 @@ def _normalize(raw: dict, params) -> dict:
                 "duration_seconds": effective_duration,
                 "visual_strategy": strategy,
                 "visual_prompt": row.visual_prompt.strip(),
+                "public_media_query": public_query,
                 "motion_prompt": row.motion_prompt.strip(),
                 "transition": row.transition.strip() or "cut",
                 "overlay_text": row.overlay_text.strip(),
@@ -481,6 +504,7 @@ Audience: {getattr(params, 'director_audience', '')}
 Purpose: {getattr(params, 'director_purpose', '')}
 Visual style: {getattr(params, 'director_style', '') or settings.get('director_style', '')}
 Maximum LOCAL_VIDEO scenes: {getattr(params, 'director_max_local_video_scenes', 1)}
+Maximum PUBLIC_IMAGE scenes: {getattr(params, 'director_max_public_image_scenes', 2)}
 {character_context}
 {research_context}
 
@@ -490,7 +514,8 @@ Maximum LOCAL_VIDEO scenes: {getattr(params, 'director_max_local_video_scenes', 
 Return one JSON object with:
 - script: narration in the requested language;
 - scenes: ordered array with scene_id, narration, duration_seconds,
-  visual_strategy (LOCAL_IMAGE or LOCAL_VIDEO), visual_prompt, motion_prompt,
+  visual_strategy (LOCAL_IMAGE, LOCAL_VIDEO or PUBLIC_IMAGE), visual_prompt,
+  public_media_query, motion_prompt,
   transition (cut, fade_in, fade_out, slide_in, slide_out, zoom_in or zoom_out)
   and a short overlay_text callout;
 - production_notes: short array of global consistency rules.
