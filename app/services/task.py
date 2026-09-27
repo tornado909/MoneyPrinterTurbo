@@ -1432,6 +1432,26 @@ def _copy_retry_task_file(
     return target
 
 
+def _retry_audio_available(source_task_id: str) -> bool:
+    if not source_task_id:
+        return False
+    source_root = path.realpath(utils.task_dir(source_task_id))
+    for filename in ("audio.wav", "audio.mp3"):
+        try:
+            source = file_security.resolve_path_within_directory(
+                source_root,
+                filename,
+            )
+        except ValueError:
+            continue
+        if not path.isfile(source):
+            continue
+        duration = voice.get_audio_duration(source)
+        if duration and math.isfinite(duration) and duration > 0:
+            return True
+    return False
+
+
 def _reuse_retry_audio(source_task_id: str, target_task_id: str):
     for filename in ("audio.wav", "audio.mp3"):
         try:
@@ -1537,6 +1557,9 @@ def _run_pipeline(
             params,
             stop_at=stop_at,
             director_plan_ready=resume_director_plan is not None,
+            narration_audio_ready=_retry_audio_available(
+                retry_source_task_id
+            ),
         )
     except asc_ai.AscAIError as exc:
         return _mark_task_failed(task_id, "preflight", str(exc))
