@@ -590,6 +590,9 @@
     "No Director Character": "No Character Hub identity",
     "Director Character Help": "Optional. Select a Character Hub identity to anchor the same character across generated scenes. Canonical reference artifacts/LoRA are used when the manifest provides them.",
     "Director Character Summary": "{name} · {kind} · references: {refs} · LoRA: {loras}",
-    "Character Hub Unavailable": "Character Hub is unavailable: {error}"
+    "Character Hub Unavailable": "Character Hub is unavailable: {error}",
+    "Local AI Runtime": "Local AI Runtime",
+    "Local AI Runtime Help": "Strict local-only mode is active. All text generation is routed to the ASC-AI scheduler-managed Qwen runtime; cloud LLM credentials are not used.",
+    "Local AI Scheduler Help": "GPU admission and model lifecycle are controlled by ASC-AI Scheduler: {scheduler}"
   }
 }
