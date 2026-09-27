@@ -115,7 +115,6 @@ GET  /api/v1/asc-ai/characters
 GET  /api/v1/asc-ai/characters/{character_id}
 POST /api/v1/asc-ai/director/plan
 POST /api/v1/asc-ai/production
-POST /api/v1/asc-ai/tasks/{task_id}/retry
 POST /api/v1/asc-ai/production/{task_id}/retry
 ```
 
@@ -123,7 +122,9 @@ POST /api/v1/asc-ai/production/{task_id}/retry
 
 `POST /production` выполняет полный local-only preflight, преобразует простой ASC-AI request в штатный `TaskVideoRequest` и ставит render в **тот же TaskManager/Redis queue**, что обычный `/videos`. Ответ возвращает обычный `task_id`; статус читается через `GET /api/v1/tasks/{task_id}`.
 
-При рестарте API **queued** задачи остаются в Redis и автоматически снова заполняют свободные worker slots. Задача, которая уже была извлечена из очереди и выполнялась в момент падения процесса, не запускается слепо второй раз: она становится `retryable=true` с `failed_stage=startup_recovery`. Повтор выполняется через `POST /api/v1/asc-ai/tasks/{task_id}/retry`; endpoint идемпотентен и создаёт ровно одного child-task с новым ID и ссылкой `retry_of`.
+При рестарте API **queued** задачи остаются в Redis и автоматически снова заполняют свободные worker slots. Задача, которая уже была извлечена из очереди и выполнялась в момент падения процесса, не запускается слепо второй раз: она становится `retryable=true` с `failed_stage=startup_recovery`. Повтор выполняется через `POST /api/v1/asc-ai/production/{task_id}/retry`; endpoint идемпотентен и создаёт ровно одного child-task с новым ID и ссылкой `retry_of`.
+
+Старый `/api/v1/asc-ai/tasks/{task_id}/retry` сохранён как совместимый alias и вызывает тот же canonical handler.
 
 Redis сохраняет queued jobs и durable JSON-safe snapshot запроса. После рестарта queued jobs автоматически продолжаются; task, который уже был взят worker'ом и оборвался вместе с процессом, помечается `retryable=true` вместо опасного автоматического replay. Его можно безопасно пересоздать через `POST /asc-ai/production/{task_id}/retry`; старая задача получит ссылку `retried_as` на новую.
 
