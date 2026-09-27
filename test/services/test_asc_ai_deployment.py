@@ -62,6 +62,9 @@ class TestAscAIDeployment(unittest.TestCase):
         release = (ROOT / "docker-compose.release.yml").read_text(encoding="utf-8")
 
         self.assertIn("ghcr.io/tornado909/moneyprinterturbo:latest", release)
+        self.assertNotIn("ghcr.io/harry0703/moneyprinterturbo", release)
+        self.assertIn("dockerfile: Dockerfile", release)
+        self.assertIn('PIP_USE_OFFICIAL: "1"', release)
         self.assertNotIn("./:/MoneyPrinterTurbo", overlay)
         self.assertIn("/srv/ai-data:/srv/ai-data", overlay)
         self.assertIn("docker-compose.release.yml", overlay)
