@@ -187,6 +187,33 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertIn("chatterbox_tts", names)
         self.assertNotIn("azure-tts-v1", names)
 
+    @patch(
+        "app.services.asc_ai._chatterbox_voice_info",
+        return_value={"name": "ru-default", "language": "ru", "aliases": []},
+    )
+    @patch("app.services.asc_ai._component_health", return_value={"status": "ok"})
+    def test_resume_preflight_skips_qwen_and_tts_but_keeps_visual_stack(
+        self, health, voice_info
+    ):
+        params = self.params(
+            custom_audio_file="",
+            voice_name="chatterbox:ru-default",
+        )
+        asc_ai.preflight(
+            params,
+            stop_at="video",
+            director_plan_ready=True,
+            narration_audio_ready=True,
+        )
+        names = [call.args[0] for call in health.call_args_list]
+        self.assertIn("scheduler", names)
+        self.assertIn("image_adapter", names)
+        self.assertIn("prompt_intelligence", names)
+        self.assertIn("visual_analyzer", names)
+        self.assertNotIn("prompt_llm", names)
+        self.assertNotIn("chatterbox_tts", names)
+        voice_info.assert_not_called()
+
     @patch("app.services.asc_ai._request_json")
     def test_chatterbox_voice_preflight_requires_installed_matching_language(
         self, request_json
