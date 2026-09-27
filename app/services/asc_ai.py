@@ -505,6 +505,13 @@ def create_director_plan(
             director_settings["public_research_enabled"] = bool(
                 task_research_override
             )
+        task_media_override = getattr(
+            params, "director_public_media_enabled", None
+        )
+        if task_media_override is not None:
+            director_settings["public_media_enabled"] = bool(
+                task_media_override
+            )
         if settings_overrides:
             director_settings.update(settings_overrides)
         plan = asc_ai_director.create_plan(
@@ -1010,8 +1017,15 @@ def acquire_public_scene_image(
     task_id: str,
     scene: dict,
     aspect: Any,
+    *,
+    enabled_override: bool | None = None,
 ) -> dict:
-    if not bool(_setting("public_media_enabled", True)):
+    media_enabled = (
+        bool(enabled_override)
+        if enabled_override is not None
+        else bool(_setting("public_media_enabled", False))
+    )
+    if not media_enabled:
         raise AscAIError("public media routing is disabled")
     query = str(scene.get("public_media_query") or "").strip()
     if not query:
@@ -1323,6 +1337,12 @@ def generate_scene_materials(
                         task_id,
                         working_scene,
                         aspect,
+                        enabled_override=bool(
+                            (plan.get("public_egress") or {}).get(
+                                "media_enabled",
+                                _setting("public_media_enabled", False),
+                            )
+                        ),
                     )
                     image_path = str(public_result["path"])
                     image_source = "wikimedia_commons"
