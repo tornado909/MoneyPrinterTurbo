@@ -4,7 +4,7 @@
 
 **Стандартный путь форка:**
 
-`тема / сценарий → Director → scene plan → Krea/Lustify → выборочные Wan I2V сцены → локальный QC → Chatterbox → Whisper → FFmpeg → готовый ролик`
+`тема / сценарий → Director → scene plan → public/local asset routing → Krea/Lustify → выборочные Wan I2V сцены → scene QC → Chatterbox → Whisper → FFmpeg → Final QA → готовый ролик`
 
 Русский | [English](README-en.md) | [日本語](README-ja.md) | [简体中文](README-upstream-zh.md) | [Upstream](https://github.com/harry0703/MoneyPrinterTurbo)
 
@@ -16,11 +16,11 @@
 - **Никакого прямого ComfyUI:** изображения и I2V идут только через ASC-AI Image Adapter.
 - **GPU Scheduler обязателен:** Director получает lease перед локальным LLM inference; Krea/Lustify, Wan и Qwen3-VL используют существующий ASC-AI control plane.
 - **Строгий local-only:** облачные LLM/TTS/image/video/music providers и автоматическая сторонняя публикация блокируются в production-пути; внутренние service URL не могут быть подменены внешним доменом.
-- **Zero-public-egress по умолчанию:** Wikipedia research и Wikimedia visual search выключены. Их можно явно разрешить отдельно для конкретной задачи; AI-инференс при этом всё равно остаётся локальным.
-- **Локальный QC:** Prompt Intelligence регистрирует каждый артефакт; adaptive policy не грузит Qwen3-VL для каждого still, но всегда анализирует Wan-видео, Character Hub сцены, retries и контрольные кадры.
+- **Cost-aware public egress:** бесплатные MediaWiki research и Wikimedia Commons factual stills включены по умолчанию, ограничены по объёму и не используют AI API. Для приватных задач оба канала можно отключить независимо; AI-инференс всегда остаётся локальным.
+- **Локальный QC + Final QA:** Prompt Intelligence регистрирует каждый артефакт; adaptive policy экономит Qwen3-VL на still-сценах, Wan-видео проверяются всегда, а готовый MP4 перед `complete` проходит CPU structural gate и по умолчанию один локальный Visual Analyzer pass с отчётом `final-qc.json`.
 - **Экономия GPU:** большая часть сцен может быть статичной генерацией + лёгким zoom/pan; bounded `PUBLIC_IMAGE` сцены реально обходят diffusion через лицензированные Wikimedia Commons материалы с local fallback; число Wan I2V сцен задаётся Director budget, а несовместимый aspect ratio отсекается до GPU enqueue.
 - **Character Hub continuity:** Director может закрепить одного canonical персонажа между сценами через reference artifacts/LoRA из ASC-AI Character Hub.
-- **Production manifest:** для каждой задачи сохраняется `production-manifest.json` с Scheduler job/stage/lease, seed/settings, artifact IDs, QC, fallback и фактическими выходами; для реально использованных Wikimedia-кадров отдельно создаются credits JSON/TXT.
+- **Production evidence:** сохраняются Director plan/execution plan, `production-manifest.json`, итоговый `final-qc.json` и, для реально использованных Wikimedia-кадров, credits JSON/TXT.
 - **Headless API:** ASC-AI агент может планировать и запускать полный render через отдельный `/api/v1/asc-ai/*` namespace без знания внутреннего `VideoParams`.
 - **Устойчивое ASC-AI-развёртывание:** production overlay включает Redis с AOF; queued API jobs возобновляются после рестарта, а оборванные in-flight jobs становятся явно retryable вместо вечного `processing`.
 - Китайский README upstream сохранён как `README-upstream-zh.md` для удобной синхронизации.
@@ -84,8 +84,8 @@ http://127.0.0.1:8080/docs
 - общий визуальный стиль;
 - целевая аудитория;
 - цель ролика;
-- необязательный public research (явный opt-in);
-- необязательный Wikimedia visual search (отдельный явный opt-in);
+- bounded public research (включён cost-aware default, можно отключить для private task);
+- bounded Wikimedia visual search (включён cost-aware default, можно отключить отдельно);
 - необязательный canonical персонаж из Character Hub.
 
 Director возвращает структурированный план:
@@ -95,8 +95,9 @@ script
 └── scenes[]
     ├── narration
     ├── duration_seconds
-    ├── visual_strategy: LOCAL_IMAGE | LOCAL_VIDEO
+    ├── visual_strategy: LOCAL_IMAGE | LOCAL_VIDEO | PUBLIC_IMAGE
     ├── visual_prompt
+    ├── public_media_query
     ├── motion_prompt
     ├── transition: cut | fade_* | slide_* | zoom_*
     └── overlay_text: короткий экранный callout
@@ -148,7 +149,7 @@ Redis сохраняет queued jobs и durable JSON-safe snapshot запрос�
 
 Допустимы локальные материалы и локальная музыка.
 
-Публичный HTTP тоже **запрещён по умолчанию на уровне продукта**. В WebUI у Director есть отдельные opt-in переключатели для Wikipedia/MediaWiki и Wikimedia Commons. Разрешение записывается в параметры конкретной queued task и в `director-plan.json → public_egress`, поэтому последующее изменение UI не меняет уже поставленную задачу.
+Публичный HTTP отделён от AI-egress policy. В этой cost-aware редакции bounded MediaWiki/Wikimedia Commons включены по умолчанию, но в WebUI/Headless API есть два независимых task-level переключателя, которыми их можно полностью отключить для приватной темы. Выбор фиксируется в queued task и в `director-plan.json → public_egress`, поэтому последующее изменение UI не меняет уже поставленную задачу.
 
 ## Локальная озвучка
 
@@ -173,7 +174,10 @@ http://host.docker.internal:4123/v1
 В каталоге задачи кроме обычных файлов появляются:
 
 - `director-plan.json` — решение Director;
-- `production-manifest.json` — фактическое выполнение сцен, QC, fallback и выходные материалы.
+- `director-execution-plan.json` — plan после детерминированной подгонки к реальной TTS-длительности;
+- `production-manifest.json` — фактическое выполнение сцен, QC, fallback и выходные материалы;
+- `final-qc.json` — финальный structural/VLM acceptance готового MP4;
+- `public-media-credits.json` / TXT — attribution только для реально использованных Commons-материалов.
 
 Это позволяет разбирать проблемную сцену отдельно, а не гадать, почему итоговый ролик получился хуже ожидаемого.
 
