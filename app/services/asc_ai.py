@@ -1180,6 +1180,9 @@ def generate_scene_materials(
                 "requested_strategy": scene.get("visual_strategy"),
                 "visual_prompt": scene.get("visual_prompt"),
                 "motion_prompt": scene.get("motion_prompt"),
+                "transition": scene.get("transition") or "cut",
+                "overlay_text": scene.get("overlay_text") or "",
+                "postprocess": None,
                 "character": {
                     "character_id": identity.get("character_id"),
                     "visual_identity_kind": identity.get(
@@ -1380,6 +1383,47 @@ def generate_scene_materials(
                     "failed to render ASC-AI scene "
                     f"{scene.get('scene_id') or '<unknown>'}"
                 )
+
+            transition = str(scene.get("transition") or "cut").strip().lower()
+            overlay_text = str(scene.get("overlay_text") or "").strip()
+            if transition != "cut" or overlay_text:
+                original_output = output_path
+                try:
+                    processed_output = video.render_director_scene_effects(
+                        original_output,
+                        transition=transition,
+                        overlay_text=overlay_text,
+                        font_name=str(
+                            _setting(
+                                "director_overlay_font",
+                                "MicrosoftYaHeiBold.ttc",
+                            )
+                        ),
+                    )
+                    output_path = processed_output
+                    scene_record["postprocess"] = {
+                        "transition": transition,
+                        "overlay_text": overlay_text,
+                        "source_output": original_output,
+                        "output": processed_output,
+                        "applied": processed_output != original_output,
+                        "error": None,
+                    }
+                except Exception as exc:
+                    scene_record["postprocess"] = {
+                        "transition": transition,
+                        "overlay_text": overlay_text,
+                        "source_output": original_output,
+                        "output": original_output,
+                        "applied": False,
+                        "error": f"{type(exc).__name__}: {str(exc)[:500]}",
+                    }
+                    logger.warning(
+                        "Director scene post-process failed; keeping approved "
+                        f"source clip: scene={scene.get('scene_id')}, "
+                        f"error={type(exc).__name__}"
+                    )
+                persist_production_manifest(task_id, manifest)
 
             scene_record["final_output"] = output_path
             scene_record["effective_duration_seconds"] = effective_scene_seconds
