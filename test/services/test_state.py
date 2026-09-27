@@ -217,6 +217,27 @@ class TestRedisState(unittest.TestCase):
         state._redis = _FakeRedis(batches)
         return state
 
+    def test_json_mode_request_snapshot_survives_redis_literal_roundtrip(self):
+        from app.models.schema import TaskVideoRequest
+
+        snapshot = TaskVideoRequest(
+            video_subject="Теплица",
+            video_aspect="9:16",
+            video_concat_mode="sequential",
+            video_fit_mode="cover",
+            video_source="asc_ai",
+        ).model_dump(mode="json", warnings=False)
+
+        restored = RedisState._convert_to_original_type(
+            str(snapshot).encode("utf-8")
+        )
+
+        self.assertIsInstance(restored, dict)
+        self.assertEqual(restored["video_aspect"], "9:16")
+        self.assertEqual(restored["video_concat_mode"], "sequential")
+        self.assertEqual(restored["video_fit_mode"], "cover")
+        self.assertEqual(restored["video_source"], "asc_ai")
+
     def test_get_all_tasks_paginates_across_scan_batches(self):
         """
         Redis SCAN 分批返回 key 时，分页切片必须按当前批次起始位置计算。
