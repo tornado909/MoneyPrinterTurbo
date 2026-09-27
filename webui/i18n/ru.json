@@ -584,8 +584,8 @@
     "Check ASC-AI": "Проверить ASC-AI",
     "ASC-AI Ready": "Сервисы ASC-AI доступны",
     "ASC-AI Unavailable": "Проверка ASC-AI не пройдена: {error}",
-    "Director Public Research": "Публичный factual research",
-    "Director Public Research Help": "Отправляет только тему ролика в Wikipedia/MediaWiki и передаёт локальному Director не более двух коротких публичных выдержек. Платные AI API не используются. Отключайте для приватных или чисто творческих тем.",
+    "Director Public Research": "Публичный поиск фактов",
+    "Director Public Research Help": "Разрешает отправить тему ролика в Wikipedia/MediaWiki и передать локальному Director ограниченное число публичных выдержек. Для приватных и конфиденциальных тем оставьте выключенным.",
     "Director Character": "Постоянный персонаж",
     "No Director Character": "Без персонажа Character Hub",
     "Director Character Help": "Необязательно. Выберите персонажа Character Hub, чтобы сохранять одну и ту же внешность между сценами. Если manifest содержит canonical reference artifacts/LoRA, они используются автоматически.",
@@ -598,6 +598,9 @@
     "Cloud APIs Disabled": "Облачные AI API отключены строгим local-only режимом.",
     "Local Production Stack Help": "MoneyPrinterTurbo использует для AI-генерации только локальный control plane ASC-AI. Ключи облачных AI-сервисов для этого production-пути не требуются.",
     "Director Public Image Scenes": "Сцены с открытыми фото",
-    "Director Public Image Scenes Help": "Максимальное число фактических сцен, для которых Director может взять свободно лицензированное фото Wikimedia Commons вместо локальной генерации. 0 полностью отключает public-media egress для этой задачи."
+    "Director Public Image Scenes Help": "Максимальное число фактических сцен, для которых Director может взять свободно лицензированное фото Wikimedia Commons вместо локальной генерации. 0 полностью отключает public-media egress для этой задачи.",
+    "Director Public Media": "Поиск визуалов в Wikimedia",
+    "Director Public Media Help": "Разрешает отправлять поисковые фразы сцен в Wikimedia Commons. Используются только подходящие свободно лицензированные изображения; при ошибке выполняется локальная генерация.",
+    "Director Public Egress Warning": "Для этой задачи разрешён публичный сетевой доступ. Тема и/или поисковые фразы сцен могут быть отправлены в Wikipedia/Wikimedia; весь AI-инференс остаётся локальным."
   }
 }
