@@ -8,7 +8,7 @@ from typing import Literal
 from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import Depends, HTTPException, Request
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.config import config
 from app.controllers import base
@@ -357,10 +357,22 @@ def retry_production(request: Request, task_id: str):
             detail="only ASC-AI production tasks can be retried here",
         )
 
+    if str(previous.get("request_stop_at") or "video") != "video":
+        raise HTTPException(
+            status_code=409,
+            detail="retryable task is not a full video production request",
+        )
+
     try:
         task_request = TaskVideoRequest(**raw_params)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"saved task parameters are stale or invalid: {exc}",
+        ) from exc
+    try:
         asc_ai.preflight(task_request, stop_at="video")
-    except (ValueError, asc_ai.AscAIError) as exc:
+    except asc_ai.AscAIError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     response = video_controller.create_task(
