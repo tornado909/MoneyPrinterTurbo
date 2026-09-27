@@ -31,7 +31,7 @@ import json, sys
 path, expr = sys.argv[1], sys.argv[2]
 with open(path, "r", encoding="utf-8") as handle:
     data = json.load(handle)
-env = {"data": data}
+env = {"data": data, "len": len, "all": all}
 if not eval(expr, {"__builtins__": {}}, env):
     raise SystemExit(f"assertion failed: {expr}")
 PY
@@ -57,7 +57,12 @@ docker compose \
   -f docker-compose.yml \
   -f docker-compose.asc-ai.yml \
   -f docker-compose.chatterbox.yml \
-  config -q || fail "docker compose config is invalid"
+  config -q || fail "development docker compose config is invalid"
+docker compose \
+  -f docker-compose.release.yml \
+  -f docker-compose.asc-ai.yml \
+  -f docker-compose.chatterbox.yml \
+  config -q || fail "release docker compose config is invalid"
 
 echo "[2/6] Checking ASC-AI capabilities..."
 curl -fsS "${headers[@]}" "$BASE_URL/api/v1/asc-ai/capabilities" \
@@ -66,6 +71,7 @@ json_assert "$TMP_DIR/capabilities.json" 'data["status"] == 200'
 json_assert "$TMP_DIR/capabilities.json" 'data["data"]["local_only"] is True'
 json_assert "$TMP_DIR/capabilities.json" 'data["data"]["director"]["scheduler_managed"] is True'
 json_assert "$TMP_DIR/capabilities.json" 'data["data"]["production"]["uses_shared_task_manager"] is True'
+json_assert "$TMP_DIR/capabilities.json" 'data["data"]["artifacts"]["final_qc"] == "final-qc.json"'
 
 echo "[3/6] Checking local production dependencies and Russian Chatterbox voice..."
 curl -fsS "${headers[@]}" "$BASE_URL/api/v1/asc-ai/health" \
@@ -165,4 +171,7 @@ json_assert "$TMP_DIR/evidence.json" 'data["data"]["artifacts"]["director_plan"]
 json_assert "$TMP_DIR/evidence.json" 'data["data"]["artifacts"]["director_execution_plan"] is not None'
 json_assert "$TMP_DIR/evidence.json" 'data["data"]["artifacts"]["production_manifest"]["status"] == "complete"'
 json_assert "$TMP_DIR/evidence.json" 'len(data["data"]["artifacts"]["production_manifest"]["outputs"]) >= 1'
+json_assert "$TMP_DIR/evidence.json" 'data["data"]["artifacts"]["final_qc"]["status"] == "passed"'
+json_assert "$TMP_DIR/evidence.json" 'data["data"]["artifacts"]["final_qc"]["passed"] is True'
+json_assert "$TMP_DIR/evidence.json" 'len(data["data"]["artifacts"]["final_qc"]["outputs"]) >= 1'
 echo "FULL ASC-AI ACCEPTANCE PASSED: $TASK_ID"
