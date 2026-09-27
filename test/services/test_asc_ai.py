@@ -539,6 +539,159 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertEqual(result["scenes"][0]["duration_seconds"], 5)
         self.assertEqual(result["scenes"][1]["duration_seconds"], 5)
 
+    def test_scene_postprocess_executes_director_transition_and_callout(self):
+        with tempfile.TemporaryDirectory() as temp_dir, (
+            patch.object(asc_ai.utils, "task_dir", return_value=temp_dir),
+            patch.object(
+                asc_ai,
+                "_image_binding",
+                return_value={
+                    "workflow_id": "image-v1",
+                    "model_id": "image-model",
+                    "default_resolution": "1024x1024",
+                },
+            ),
+            patch.object(
+                asc_ai,
+                "generate_image",
+                return_value=str(Path(temp_dir) / "image.png"),
+            ),
+            patch.object(
+                asc_ai,
+                "quality_control",
+                return_value={
+                    "passed": True,
+                    "technical_status": "valid",
+                    "technical_score": 1.0,
+                    "semantic_score": None,
+                    "issues": [],
+                    "retry_prompt": "",
+                },
+            ),
+            patch.object(
+                asc_ai.video,
+                "render_image_zoom_video",
+                return_value=str(Path(temp_dir) / "scene.mp4"),
+            ),
+            patch.object(
+                asc_ai.video,
+                "render_director_scene_effects",
+                return_value=str(Path(temp_dir) / "scene.director.mp4"),
+            ) as postprocess,
+        ):
+            paths = asc_ai.generate_scene_materials(
+                task_id="task",
+                plan={
+                    "schema_version": "mpt.director.v3",
+                    "director_provider": "asc-ai-local-qwen3",
+                    "gpu_policy": "scheduler_managed",
+                    "scenes": [
+                        {
+                            "scene_id": "scene_01",
+                            "visual_strategy": "LOCAL_IMAGE",
+                            "duration_seconds": 4,
+                            "visual_prompt": "modern greenhouse",
+                            "motion_prompt": "",
+                            "transition": "fade_in",
+                            "overlay_text": "Урожай +20%",
+                        }
+                    ],
+                },
+                audio_duration=4.0,
+                aspect="9:16",
+                clip_duration=5,
+            )
+
+            self.assertEqual(
+                paths, [str(Path(temp_dir) / "scene.director.mp4")]
+            )
+            postprocess.assert_called_once()
+            self.assertEqual(postprocess.call_args.kwargs["transition"], "fade_in")
+            self.assertEqual(
+                postprocess.call_args.kwargs["overlay_text"], "Урожай +20%"
+            )
+            manifest = json.loads(
+                (Path(temp_dir) / "production-manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertTrue(manifest["scenes"][0]["postprocess"]["applied"])
+            self.assertEqual(
+                manifest["scenes"][0]["final_output"],
+                str(Path(temp_dir) / "scene.director.mp4"),
+            )
+
+    def test_scene_postprocess_failure_keeps_approved_source_clip(self):
+        with tempfile.TemporaryDirectory() as temp_dir, (
+            patch.object(asc_ai.utils, "task_dir", return_value=temp_dir),
+            patch.object(
+                asc_ai,
+                "_image_binding",
+                return_value={
+                    "workflow_id": "image-v1",
+                    "model_id": "image-model",
+                    "default_resolution": "1024x1024",
+                },
+            ),
+            patch.object(
+                asc_ai,
+                "generate_image",
+                return_value=str(Path(temp_dir) / "image.png"),
+            ),
+            patch.object(
+                asc_ai,
+                "quality_control",
+                return_value={
+                    "passed": True,
+                    "technical_status": "valid",
+                    "technical_score": 1.0,
+                    "semantic_score": None,
+                    "issues": [],
+                    "retry_prompt": "",
+                },
+            ),
+            patch.object(
+                asc_ai.video,
+                "render_image_zoom_video",
+                return_value=str(Path(temp_dir) / "scene.mp4"),
+            ),
+            patch.object(
+                asc_ai.video,
+                "render_director_scene_effects",
+                side_effect=RuntimeError("font failure"),
+            ),
+        ):
+            paths = asc_ai.generate_scene_materials(
+                task_id="task",
+                plan={
+                    "schema_version": "mpt.director.v3",
+                    "director_provider": "asc-ai-local-qwen3",
+                    "gpu_policy": "scheduler_managed",
+                    "scenes": [
+                        {
+                            "scene_id": "scene_01",
+                            "visual_strategy": "LOCAL_IMAGE",
+                            "duration_seconds": 4,
+                            "visual_prompt": "modern greenhouse",
+                            "transition": "fade_in",
+                            "overlay_text": "Факт",
+                        }
+                    ],
+                },
+                audio_duration=4.0,
+                aspect="9:16",
+                clip_duration=5,
+            )
+            self.assertEqual(paths, [str(Path(temp_dir) / "scene.mp4")])
+            manifest = json.loads(
+                (Path(temp_dir) / "production-manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            post = manifest["scenes"][0]["postprocess"]
+            self.assertFalse(post["applied"])
+            self.assertIn("RuntimeError", post["error"])
+
     def test_retime_director_plan_fits_real_audio_without_extra_inference(self):
         plan = {
             "scenes": [
