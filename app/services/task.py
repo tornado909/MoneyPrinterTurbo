@@ -1670,6 +1670,11 @@ def _run_pipeline(
         # pipeline's small max_clip_duration would otherwise truncate long
         # still scenes and random mode could reorder the story.
         params.video_concat_mode = VideoConcatMode.sequential
+        # Scene clips are already duration-fitted and have Director transitions
+        # baked in. Generic montage speed/transition controls must not alter the
+        # scene timeline a second time.
+        params.video_clip_speed = 1.0
+        params.video_transition_mode = None
         director_durations = [
             max(2, min(15, int(scene.get("duration_seconds") or 5)))
             for scene in (director_plan.get("scenes") or [])
