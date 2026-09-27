@@ -64,6 +64,78 @@ class TestVideoService(unittest.TestCase):
         vd._runtime_disabled_video_codecs.clear()
         vd._ffmpeg_encoder_exists.cache_clear()
 
+    def test_director_video_timing_returns_native_clip_when_already_matching(self):
+        source = MagicMock()
+        source.duration = 5.0
+        source.size = (543, 960)
+        with (
+            patch.object(vd, "_open_video_clip_quietly", return_value=source),
+            patch.object(vd, "_write_videofile_with_codec_fallback") as write,
+            patch.object(vd, "close_clip") as close,
+        ):
+            result = vd.fit_director_video_duration(
+                "/tmp/wan.mp4",
+                "/tmp/source.png",
+                5,
+            )
+        self.assertEqual(result, "/tmp/wan.mp4")
+        write.assert_not_called()
+        close.assert_called_once_with(source)
+
+    def test_director_video_timing_trims_longer_native_clip_locally(self):
+        source = MagicMock()
+        source.duration = 5.5
+        source.size = (543, 960)
+        trimmed = MagicMock()
+        source.subclipped.return_value = trimmed
+        with (
+            patch.object(vd, "_open_video_clip_quietly", return_value=source),
+            patch.object(vd, "_write_videofile_with_codec_fallback") as write,
+            patch.object(vd, "close_clip"),
+        ):
+            result = vd.fit_director_video_duration(
+                "/tmp/wan.mp4",
+                "/tmp/source.png",
+                3,
+            )
+        self.assertEqual(result, "/tmp/wan.timed.mp4")
+        source.subclipped.assert_called_once_with(0, 3.0)
+        self.assertEqual(write.call_args.args[1], "/tmp/wan.timed.mp4")
+        self.assertFalse(write.call_args.kwargs["audio"])
+
+    def test_director_video_timing_extends_with_non_neural_image_tail(self):
+        source = MagicMock()
+        source.duration = 5.0
+        source.size = (543, 960)
+        tail = MagicMock()
+        zoom_tail = MagicMock()
+        tail.with_duration.return_value = tail
+        tail.resized.side_effect = [tail, zoom_tail]
+        tail.with_position.return_value = tail
+        combined = MagicMock()
+        combined.with_duration.return_value = combined
+
+        with (
+            patch.object(vd, "_open_video_clip_quietly", return_value=source),
+            patch.object(vd, "ImageClip", return_value=tail),
+            patch.object(vd, "concatenate_videoclips", return_value=combined) as concat,
+            patch.object(vd, "_write_videofile_with_codec_fallback") as write,
+            patch.object(vd, "close_clip"),
+        ):
+            result = vd.fit_director_video_duration(
+                "/tmp/wan.mp4",
+                "/tmp/source.png",
+                9,
+            )
+
+        self.assertEqual(result, "/tmp/wan.timed.mp4")
+        tail.with_duration.assert_called_once_with(4.0)
+        tail.resized.assert_any_call(new_size=(543, 960))
+        concat.assert_called_once_with([source, zoom_tail], method="compose")
+        combined.with_duration.assert_called_once_with(9.0)
+        self.assertEqual(write.call_args.args[1], "/tmp/wan.timed.mp4")
+        self.assertFalse(write.call_args.kwargs["audio"])
+
     def test_director_transition_dispatch_is_typed_and_deterministic(self):
         clip = MagicMock()
         clip.duration = 4.0
