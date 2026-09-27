@@ -130,6 +130,10 @@ Redis сохраняет queued jobs и durable JSON-safe snapshot запрос�
 
 Для agent retries поддерживается persistent header `Idempotency-Key` (8–128 символов). Один и тот же ключ + тот же payload возвращает тот же детерминированный `task_id` без нового render; повтор ключа с другим payload возвращает `409`. Claim хранится в task state и переживает рестарт API.
 
+## Cost-aware public sources
+
+По умолчанию Director может отправлять **только тему/поисковый запрос** в MediaWiki и Wikimedia Commons. Это не AI API и не требует ключей/оплаты. Commons-кандидаты проходят license policy, relevance ranking, локальный QC и всегда имеют fallback на локальную генерацию. Для закрытых корпоративных тем public egress можно полностью отключить двумя переключателями **Public Research** и **Public Media**.
+
 ## Local-only policy
 
 При `[asc_ai] local_only = true`:
