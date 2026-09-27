@@ -72,6 +72,7 @@ class DirectorPlanRequest(BaseModel):
     )
     target_duration_seconds: int = Field(default=45, ge=5, le=300)
     max_local_video_scenes: int = Field(default=1, ge=0, le=6)
+    max_public_image_scenes: int = Field(default=2, ge=0, le=6)
     style: str = Field(default="", max_length=2000)
     audience: str = Field(default="", max_length=1000)
     purpose: str = Field(default="", max_length=1000)
@@ -87,6 +88,7 @@ class DirectorPlanRequest(BaseModel):
             director_enabled=True,
             director_target_duration_seconds=self.target_duration_seconds,
             director_max_local_video_scenes=self.max_local_video_scenes,
+            director_max_public_image_scenes=self.max_public_image_scenes,
             director_style=self.style,
             director_audience=self.audience,
             director_purpose=self.purpose,
@@ -135,6 +137,7 @@ class ProductionRequest(DirectorPlanRequest):
             director_enabled=True,
             director_target_duration_seconds=self.target_duration_seconds,
             director_max_local_video_scenes=self.max_local_video_scenes,
+            director_max_public_image_scenes=self.max_public_image_scenes,
             director_style=self.style,
             director_audience=self.audience,
             director_purpose=self.purpose,
@@ -171,6 +174,8 @@ def capabilities(request: Request):
             },
             "image": {
                 "adapter": "asc-ai-image-adapter",
+                "public_media": "wikimedia-commons",
+                "public_media_local_fallback": True,
                 "character_hub": True,
                 "identity_reference": True,
                 "local_qc": True,
