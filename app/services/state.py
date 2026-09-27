@@ -7,6 +7,19 @@ from app.config import config
 from app.models import const
 
 
+_CREATE_TASK_IF_ABSENT_SCRIPT = """
+if redis.call("EXISTS", KEYS[1]) == 1 then
+    return 0
+end
+
+for index = 1, #ARGV, 2 do
+    redis.call("HSET", KEYS[1], ARGV[index], ARGV[index + 1])
+end
+
+return 1
+"""
+
+
 _PATCH_EXISTING_TASK_SCRIPT = """
 if redis.call("EXISTS", KEYS[1]) == 0 then
     return 0
@@ -38,6 +51,17 @@ class BaseState(ABC):
     def patch_task(self, task_id: str, **kwargs) -> bool:
         """只更新已有任务的指定字段；任务不存在时返回 False。"""
         pass
+
+
+    def create_task_if_absent(
+        self,
+        task_id: str,
+        state: int = const.TASK_STATE_PROCESSING,
+        progress: int = 0,
+        **kwargs,
+    ) -> bool:
+        """Atomically create a task record only when the id does not exist."""
+        raise NotImplementedError()
 
 
 # Memory state management
@@ -77,6 +101,25 @@ class MemoryState(BaseState):
         with self._lock:
             task = self._tasks.get(task_id, None)
             return copy.deepcopy(task) if task is not None else None
+
+    def create_task_if_absent(
+        self,
+        task_id: str,
+        state: int = const.TASK_STATE_PROCESSING,
+        progress: int = 0,
+        **kwargs,
+    ) -> bool:
+        progress = max(0, min(100, int(progress)))
+        with self._lock:
+            if task_id in self._tasks:
+                return False
+            self._tasks[task_id] = {
+                "task_id": task_id,
+                "state": state,
+                "progress": progress,
+                **copy.deepcopy(kwargs),
+            }
+            return True
 
     def patch_task(self, task_id: str, **kwargs) -> bool:
         # 异步发布只应补充发布状态，不能覆盖已经保存的视频、字幕等结果。
@@ -181,6 +224,31 @@ class RedisState(BaseState):
             for key, value in task_data.items()
         }
         return task
+
+    def create_task_if_absent(
+        self,
+        task_id: str,
+        state: int = const.TASK_STATE_PROCESSING,
+        progress: int = 0,
+        **kwargs,
+    ) -> bool:
+        progress = max(0, min(100, int(progress)))
+        fields = {
+            "task_id": task_id,
+            "state": state,
+            "progress": progress,
+            **kwargs,
+        }
+        arguments = []
+        for field, value in fields.items():
+            arguments.extend((field, str(value)))
+        created = self._redis.eval(
+            _CREATE_TASK_IF_ABSENT_SCRIPT,
+            1,
+            task_id,
+            *arguments,
+        )
+        return bool(created)
 
     def patch_task(self, task_id: str, **kwargs) -> bool:
         if not kwargs:
