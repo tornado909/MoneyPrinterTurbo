@@ -2,8 +2,9 @@
 #
 # Run together with the ASC-AI overlay. Production uses the fork image:
 #   docker compose -f docker-compose.release.yml -f docker-compose.asc-ai.yml \
-#     -f docker-compose.chatterbox.yml up -d --build
-# For source development, replace docker-compose.release.yml with docker-compose.yml.
+#     -f docker-compose.chatterbox.yml up -d
+# For source development, replace docker-compose.release.yml with docker-compose.yml
+# and add --build while iterating on local code.
 #
 # The TTS service has no GPU access. Model cache and uploaded Russian voices
 # persist under /srv/ai and /srv/ai-data.
