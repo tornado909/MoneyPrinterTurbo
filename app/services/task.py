@@ -1507,6 +1507,11 @@ def _run_pipeline(
             resume_director_plan = asc_ai.load_director_plan(
                 retry_source_task_id
             )
+            if resume_director_plan:
+                resume_director_plan = asc_ai.sanitize_resumed_plan(
+                    resume_director_plan,
+                    params,
+                )
         except asc_ai.AscAIError as exc:
             logger.warning(
                 "saved Director plan cannot be reused; normal planning will run: "
