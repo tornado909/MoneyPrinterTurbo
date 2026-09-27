@@ -1498,7 +1498,13 @@ def _run_pipeline(
     voxcpm_prompt_text: str = "",
 ):
     logger.info(f"start task: {task_id}, stop_at: {stop_at}")
-    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=5)
+    retry_source_task_id = _retry_source_task_id(task_id)
+    sm.state.update_task(
+        task_id,
+        state=const.TASK_STATE_PROCESSING,
+        progress=5,
+        resume_from_task=retry_source_task_id or None,
+    )
 
     try:
         asc_ai.preflight(params, stop_at=stop_at)
@@ -1619,7 +1625,24 @@ def _run_pipeline(
     director_plan = None
     if getattr(params, "director_enabled", False):
         try:
-            director_plan = asc_ai.create_director_plan(params)
+            if retry_source_task_id:
+                director_plan = asc_ai.load_director_plan(retry_source_task_id)
+                if director_plan:
+                    requested_script = str(params.video_script or "").strip()
+                    resumed_script = str(director_plan.get("script") or "").strip()
+                    if requested_script and requested_script != resumed_script:
+                        logger.warning(
+                            "saved Director plan does not match requested script; "
+                            "planning again instead of resuming"
+                        )
+                        director_plan = None
+            if director_plan is None:
+                director_plan = asc_ai.create_director_plan(params)
+            else:
+                logger.info(
+                    f"reusing Director plan from interrupted task: "
+                    f"source={retry_source_task_id}, target={task_id}"
+                )
             asc_ai.persist_director_plan(task_id, director_plan)
             video_script = str(director_plan.get("script") or "").strip()
         except asc_ai.AscAIError as exc:
@@ -1677,12 +1700,20 @@ def _run_pipeline(
     if voxcpm_prompt_audio is not None:
         generate_audio_kwargs["voxcpm_prompt_audio"] = voxcpm_prompt_audio
         generate_audio_kwargs["voxcpm_prompt_text"] = voxcpm_prompt_text
-    audio_file, audio_duration, sub_maker = generate_audio(
-        task_id,
-        params,
-        video_script,
-        **generate_audio_kwargs,
+    reused_audio = (
+        _reuse_retry_audio(retry_source_task_id, task_id)
+        if retry_source_task_id
+        else None
     )
+    if reused_audio:
+        audio_file, audio_duration, sub_maker = reused_audio
+    else:
+        audio_file, audio_duration, sub_maker = generate_audio(
+            task_id,
+            params,
+            video_script,
+            **generate_audio_kwargs,
+        )
     if not audio_file:
         return _mark_task_failed(
             task_id,
@@ -1702,9 +1733,19 @@ def _run_pipeline(
         return {"audio_file": audio_file, "audio_duration": audio_duration}
 
     # 4. Generate subtitle
-    subtitle_path = generate_subtitle(
-        task_id, params, video_script, sub_maker, audio_file
+    subtitle_path = (
+        _reuse_retry_subtitle(
+            retry_source_task_id,
+            task_id,
+            enabled=bool(params.subtitle_enabled),
+        )
+        if retry_source_task_id
+        else ""
     )
+    if not subtitle_path:
+        subtitle_path = generate_subtitle(
+            task_id, params, video_script, sub_maker, audio_file
+        )
 
     if stop_at == "subtitle":
         sm.state.update_task(
