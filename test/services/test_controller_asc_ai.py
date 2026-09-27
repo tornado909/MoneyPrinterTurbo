@@ -203,6 +203,14 @@ class TestAscAIController(unittest.TestCase):
         self.assertEqual(claim.args[0], expected_task_id)
         self.assertEqual(claim.kwargs["request_fingerprint"], "fingerprint-1")
         self.assertEqual(claim.kwargs["idempotency_scope"], "asc-ai-production")
+        self.assertEqual(claim.kwargs["request_stop_at"], "video")
+        self.assertEqual(
+            claim.kwargs["request_params"]["video_source"],
+            "asc_ai",
+        )
+        self.assertTrue(
+            claim.kwargs["request_params"]["director_enabled"],
+        )
         create_task.assert_called_once()
         self.assertEqual(
             create_task.call_args.kwargs["task_id_override"],
