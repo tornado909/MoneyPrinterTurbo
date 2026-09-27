@@ -1104,6 +1104,219 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertFalse(result["timing"]["fully_matched"])
         self.assertEqual(result["timing"]["feasible_max_seconds"], 15)
 
+    def test_scene_resume_reuses_matching_completed_clip_without_gpu_work(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_dir = root / "old-task"
+            new_dir = root / "new-task"
+            old_dir.mkdir()
+            new_dir.mkdir()
+            old_clip = old_dir / "scene.mp4"
+            old_clip.write_bytes(b"fake-video")
+            old_manifest = {
+                "status": "failed",
+                "scenes": [
+                    {
+                        "scene_id": "scene_01",
+                        "requested_strategy": "LOCAL_IMAGE",
+                        "visual_prompt": "greenhouse",
+                        "motion_prompt": "",
+                        "character": None,
+                        "image_workflow": {
+                            "workflow_id": "image-v1",
+                            "model_id": "image-model",
+                            "resolution": "768x1344",
+                        },
+                        "public_media": None,
+                        "postprocess": {},
+                        "final_output": str(old_clip),
+                        "effective_duration_seconds": 5,
+                        "image_source": "local_generation",
+                    }
+                ],
+            }
+            (old_dir / "production-manifest.json").write_text(
+                json.dumps(old_manifest),
+                encoding="utf-8",
+            )
+
+            def task_dir(task_id=""):
+                if task_id == "old-task":
+                    return str(old_dir)
+                if task_id == "new-task":
+                    return str(new_dir)
+                return str(root)
+
+            fake_clip = MagicMock()
+            fake_clip.duration = 5.0
+            with (
+                patch.object(asc_ai.utils, "task_dir", side_effect=task_dir),
+                patch.object(
+                    asc_ai,
+                    "_image_binding",
+                    return_value={
+                        "workflow_id": "image-v1",
+                        "model_id": "image-model",
+                        "default_resolution": "768x1344",
+                    },
+                ),
+                patch.object(
+                    asc_ai.video,
+                    "_open_video_clip_quietly",
+                    return_value=fake_clip,
+                ),
+                patch.object(asc_ai.video, "close_clip"),
+                patch.object(asc_ai, "generate_image") as generate_image,
+                patch.object(asc_ai, "quality_control") as quality_control,
+            ):
+                result = asc_ai.generate_scene_materials(
+                    task_id="new-task",
+                    plan={
+                        "schema_version": "mpt.director.v3",
+                        "local_only": True,
+                        "director_provider": "asc-ai-local-qwen3",
+                        "gpu_policy": "scheduler_managed",
+                        "scenes": [
+                            {
+                                "scene_id": "scene_01",
+                                "visual_strategy": "LOCAL_IMAGE",
+                                "visual_prompt": "greenhouse",
+                                "motion_prompt": "",
+                                "transition": "cut",
+                                "overlay_text": "",
+                                "duration_seconds": 5,
+                            }
+                        ],
+                    },
+                    audio_duration=5.0,
+                    aspect="9:16",
+                    clip_duration=5,
+                    resume_from_task_id="old-task",
+                )
+
+            self.assertEqual(len(result), 1)
+            self.assertTrue(Path(result[0]).is_file())
+            self.assertIn("resumed-scenes", result[0])
+            generate_image.assert_not_called()
+            quality_control.assert_not_called()
+            manifest = json.loads(
+                (new_dir / "production-manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertTrue(manifest["scenes"][0]["resume"]["reused"])
+            self.assertEqual(
+                manifest["scenes"][0]["resume"]["source_task_id"],
+                "old-task",
+            )
+
+    def test_scene_resume_duration_mismatch_forces_normal_regeneration(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_dir = root / "old-task"
+            new_dir = root / "new-task"
+            old_dir.mkdir()
+            new_dir.mkdir()
+            old_clip = old_dir / "scene.mp4"
+            old_clip.write_bytes(b"fake-video")
+            (old_dir / "production-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "scenes": [
+                            {
+                                "scene_id": "scene_01",
+                                "requested_strategy": "LOCAL_IMAGE",
+                                "visual_prompt": "greenhouse",
+                                "motion_prompt": "",
+                                "character": None,
+                                "postprocess": {},
+                                "final_output": str(old_clip),
+                                "effective_duration_seconds": 5,
+                                "image_source": "local_generation",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            generated_image = new_dir / "generated.png"
+            generated_image.write_bytes(b"image")
+            generated_clip = str(new_dir / "generated.mp4")
+
+            def task_dir(task_id=""):
+                return str(
+                    old_dir if task_id == "old-task"
+                    else new_dir if task_id == "new-task"
+                    else root
+                )
+
+            with (
+                patch.object(asc_ai.utils, "task_dir", side_effect=task_dir),
+                patch.object(
+                    asc_ai,
+                    "_image_binding",
+                    return_value={
+                        "workflow_id": "image-v1",
+                        "model_id": "image-model",
+                        "default_resolution": "768x1344",
+                    },
+                ),
+                patch.object(
+                    asc_ai,
+                    "_workflow_resolution",
+                    return_value=(768, 1344),
+                ),
+                patch.object(
+                    asc_ai,
+                    "generate_image",
+                    return_value=(str(generated_image), {"job_id": "job-new"}),
+                ) as generate_image,
+                patch.object(
+                    asc_ai,
+                    "quality_control",
+                    return_value={
+                        "passed": True,
+                        "technical_status": "valid",
+                        "technical_score": 1.0,
+                        "semantic_score": None,
+                        "issues": [],
+                        "retry_prompt": "",
+                    },
+                ),
+                patch.object(
+                    asc_ai.video,
+                    "render_image_zoom_video",
+                    return_value=generated_clip,
+                ),
+            ):
+                result = asc_ai.generate_scene_materials(
+                    task_id="new-task",
+                    plan={
+                        "schema_version": "mpt.director.v3",
+                        "local_only": True,
+                        "director_provider": "asc-ai-local-qwen3",
+                        "gpu_policy": "scheduler_managed",
+                        "scenes": [
+                            {
+                                "scene_id": "scene_01",
+                                "visual_strategy": "LOCAL_IMAGE",
+                                "visual_prompt": "greenhouse",
+                                "motion_prompt": "",
+                                "transition": "cut",
+                                "overlay_text": "",
+                                "duration_seconds": 8,
+                            }
+                        ],
+                    },
+                    audio_duration=8.0,
+                    aspect="9:16",
+                    clip_duration=5,
+                    resume_from_task_id="old-task",
+                )
+
+            self.assertEqual(result, [generated_clip])
+            generate_image.assert_called_once()
+
     def test_public_image_scene_skips_local_diffusion_and_writes_credits(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             public_image = Path(temp_dir) / "public.png"
