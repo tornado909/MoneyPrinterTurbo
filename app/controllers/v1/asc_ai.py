@@ -46,6 +46,15 @@ def _production_task_id(idempotency_key: str) -> str:
     )
 
 
+def _retry_task_id(task_id: str) -> str:
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            "moneyprinterturbo:asc-ai:retry:" + str(task_id),
+        )
+    )
+
+
 def _idempotent_replay_or_conflict(
     task_id: str,
     fingerprint: str,
@@ -339,6 +348,11 @@ def retry_production(request: Request, task_id: str):
     previous = video_controller.sm.state.get_task(task_id)
     if not previous:
         raise HTTPException(status_code=404, detail="task not found")
+
+    existing_retry_id = str(previous.get("retried_as") or "").strip()
+    if existing_retry_id:
+        return utils.get_response(200, {"task_id": existing_retry_id})
+
     if not bool(previous.get("retryable", False)):
         raise HTTPException(
             status_code=409,
@@ -356,7 +370,6 @@ def retry_production(request: Request, task_id: str):
             status_code=409,
             detail="only ASC-AI production tasks can be retried here",
         )
-
     if str(previous.get("request_stop_at") or "video") != "video":
         raise HTTPException(
             status_code=409,
@@ -375,22 +388,61 @@ def retry_production(request: Request, task_id: str):
     except asc_ai.AscAIError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    retry_task_id = _retry_task_id(task_id)
+    retry_fingerprint = _production_fingerprint(task_request)
+    existing = video_controller.sm.state.get_task(retry_task_id)
+    if existing:
+        if str(existing.get("request_fingerprint") or "") != retry_fingerprint:
+            raise HTTPException(
+                status_code=409,
+                detail="deterministic retry task exists with a different payload",
+            )
+        video_controller.sm.state.patch_task(
+            task_id,
+            retried_as=retry_task_id,
+            retryable=False,
+            recovery_action="resubmitted",
+        )
+        return utils.get_response(200, {"task_id": retry_task_id})
+
+    created = video_controller.sm.state.create_task_if_absent(
+        retry_task_id,
+        queue_executor="api",
+        retryable=False,
+        request_fingerprint=retry_fingerprint,
+        idempotency_scope="asc-ai-retry",
+        request_params=task_request.model_dump(mode="json", warnings=False),
+        request_stop_at="video",
+        retry_of=task_id,
+        retry_reason="manual_resubmit_after_interruption",
+    )
+    if not created:
+        raced = video_controller.sm.state.get_task(retry_task_id)
+        if not raced or str(raced.get("request_fingerprint") or "") != retry_fingerprint:
+            raise HTTPException(
+                status_code=409,
+                detail="retry task claim could not be resolved",
+            )
+        video_controller.sm.state.patch_task(
+            task_id,
+            retried_as=retry_task_id,
+            retryable=False,
+            recovery_action="resubmitted",
+        )
+        return utils.get_response(200, {"task_id": retry_task_id})
+
     response = video_controller.create_task(
         request,
         task_request,
         stop_at="video",
-        state_metadata={
-            "retry_of": task_id,
-            "retry_reason": "manual_resubmit_after_interruption",
-        },
+        task_id_override=retry_task_id,
+        initial_state_claimed=True,
     )
-    data = response.get("data") if isinstance(response, dict) else None
-    new_task_id = data.get("task_id") if isinstance(data, dict) else None
-    if isinstance(new_task_id, str) and new_task_id:
-        video_controller.sm.state.patch_task(
-            task_id,
-            retried_as=new_task_id,
-            retryable=False,
-            recovery_action="resubmitted",
-        )
+    video_controller.sm.state.patch_task(
+        task_id,
+        retried_as=retry_task_id,
+        retryable=False,
+        recovery_action="resubmitted",
+    )
     return response
+
