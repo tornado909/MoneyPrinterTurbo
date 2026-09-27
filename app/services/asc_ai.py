@@ -997,9 +997,10 @@ def quality_control(
 def retime_director_plan(plan: dict, audio_duration: float) -> dict:
     """Deterministically fit Director scene timing to the real TTS duration.
 
-    LOCAL_VIDEO scenes stay at the native five-second Wan duration. LOCAL_IMAGE
-    scenes absorb the TTS drift within the typed 2..15 second bounds. No extra
-    LLM call is needed.
+    Every scene can be fitted into the typed 2..15 second range. LOCAL_VIDEO
+    still consumes only one canonical five-second Wan job; the approved clip is
+    trimmed or extended locally afterwards. No extra LLM or GPU inference is
+    needed for retiming.
     """
     result = dict(plan)
     source_scenes = [
@@ -1011,74 +1012,58 @@ def retime_director_plan(plan: dict, audio_duration: float) -> dict:
         return result
 
     target_seconds = max(1, int(math.ceil(float(audio_duration or 0.0))))
-    image_indices = []
-    fixed_seconds = 0
+    scene_indices = list(range(len(source_scenes)))
     requested = {}
     for index, scene in enumerate(source_scenes):
         original = max(2, min(15, int(scene.get("duration_seconds") or 5)))
         requested[index] = original
         scene["planned_duration_seconds"] = original
-        if scene.get("visual_strategy") == "LOCAL_VIDEO":
-            scene["duration_seconds"] = 5
-            fixed_seconds += 5
-        else:
-            image_indices.append(index)
 
-    feasible_min = fixed_seconds + 2 * len(image_indices)
-    feasible_max = fixed_seconds + 15 * len(image_indices)
+    feasible_min = 2 * len(scene_indices)
+    feasible_max = 15 * len(scene_indices)
     bounded_target = max(feasible_min, min(feasible_max, target_seconds))
 
-    if image_indices:
-        image_target = bounded_target - fixed_seconds
-        # Once Director narrations are a verbatim partition of the script,
-        # text length is a better deterministic timing proxy than the model's
-        # first-pass duration guess. Whitespace is ignored so Russian/English
-        # formatting differences do not distort the ratio.
-        weights = []
-        for index in image_indices:
-            narration = str(source_scenes[index].get("narration") or "")
-            narration_units = len(re.sub(r"\s+", "", narration))
-            weights.append(max(1, narration_units or requested[index]))
-        weight_sum = float(sum(weights))
-        ideals = [image_target * weight / weight_sum for weight in weights]
-        durations = [max(2, min(15, int(math.floor(value)))) for value in ideals]
+    weights = []
+    for index in scene_indices:
+        narration = str(source_scenes[index].get("narration") or "")
+        narration_units = len(re.sub(r"\s+", "", narration))
+        weights.append(max(1, narration_units or requested[index]))
+    weight_sum = float(sum(weights))
+    ideals = [bounded_target * weight / weight_sum for weight in weights]
+    durations = [max(2, min(15, int(math.floor(value)))) for value in ideals]
 
-        delta = image_target - sum(durations)
-        while delta > 0:
-            candidates = [
-                pos for pos, value in enumerate(durations) if value < 15
-            ]
-            if not candidates:
-                break
-            pos = max(
-                candidates,
-                key=lambda item: (
-                    ideals[item] - durations[item],
-                    weights[item],
-                    -item,
-                ),
-            )
-            durations[pos] += 1
-            delta -= 1
-        while delta < 0:
-            candidates = [
-                pos for pos, value in enumerate(durations) if value > 2
-            ]
-            if not candidates:
-                break
-            pos = min(
-                candidates,
-                key=lambda item: (
-                    ideals[item] - durations[item],
-                    weights[item],
-                    item,
-                ),
-            )
-            durations[pos] -= 1
-            delta += 1
+    delta = bounded_target - sum(durations)
+    while delta > 0:
+        candidates = [pos for pos, value in enumerate(durations) if value < 15]
+        if not candidates:
+            break
+        pos = max(
+            candidates,
+            key=lambda item: (
+                ideals[item] - durations[item],
+                weights[item],
+                -item,
+            ),
+        )
+        durations[pos] += 1
+        delta -= 1
+    while delta < 0:
+        candidates = [pos for pos, value in enumerate(durations) if value > 2]
+        if not candidates:
+            break
+        pos = min(
+            candidates,
+            key=lambda item: (
+                ideals[item] - durations[item],
+                weights[item],
+                item,
+            ),
+        )
+        durations[pos] -= 1
+        delta += 1
 
-        for pos, scene_index in enumerate(image_indices):
-            source_scenes[scene_index]["duration_seconds"] = durations[pos]
+    for pos, scene_index in enumerate(scene_indices):
+        source_scenes[scene_index]["duration_seconds"] = durations[pos]
 
     effective_total = sum(
         int(scene.get("duration_seconds") or 0) for scene in source_scenes
