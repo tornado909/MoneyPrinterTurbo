@@ -107,6 +107,7 @@ class DirectorPlanRequest(BaseModel):
     purpose: str = Field(default="", max_length=1000)
     character_id: str = Field(default="", max_length=128)
     public_research_enabled: bool | None = None
+    public_media_enabled: bool | None = None
 
     def to_params(self) -> SimpleNamespace:
         return SimpleNamespace(
@@ -123,6 +124,7 @@ class DirectorPlanRequest(BaseModel):
             director_purpose=self.purpose,
             director_character_id=self.character_id,
             director_public_research_enabled=self.public_research_enabled,
+            director_public_media_enabled=self.public_media_enabled,
             video_source="asc_ai",
             subtitle_enabled=False,
             bgm_type="",
@@ -172,6 +174,7 @@ class ProductionRequest(DirectorPlanRequest):
             director_purpose=self.purpose,
             director_character_id=self.character_id,
             director_public_research_enabled=self.public_research_enabled,
+            director_public_media_enabled=self.public_media_enabled,
             subtitle_enabled=self.subtitle_enabled,
             bgm_type=self.bgm_type,
             bgm_file=self.bgm_file,
@@ -198,6 +201,7 @@ def capabilities(request: Request):
             "egress_policy": {
                 "internal_ai_endpoints": "private-or-explicit-local-hosts-only",
                 "external_ai_endpoints": "blocked",
+                "public_http_default": "disabled-opt-in",
                 "public_http_sources": [
                     "https://*.wikipedia.org/w/api.php",
                     "https://commons.wikimedia.org/w/api.php",
@@ -287,6 +291,8 @@ def director_plan(request: Request, body: DirectorPlanRequest):
     overrides = {}
     if body.public_research_enabled is not None:
         overrides["public_research_enabled"] = body.public_research_enabled
+    if body.public_media_enabled is not None:
+        overrides["public_media_enabled"] = body.public_media_enabled
     try:
         asc_ai.preflight(params, stop_at="script")
         plan = asc_ai.create_director_plan(
