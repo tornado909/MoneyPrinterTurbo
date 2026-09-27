@@ -195,6 +195,15 @@ def capabilities(request: Request):
         {
             "schema_version": "mpt.asc-ai.capabilities.v1",
             "local_only": asc_ai.local_only(),
+            "egress_policy": {
+                "internal_ai_endpoints": "private-or-explicit-local-hosts-only",
+                "external_ai_endpoints": "blocked",
+                "public_http_sources": [
+                    "https://*.wikipedia.org/w/api.php",
+                    "https://commons.wikimedia.org/w/api.php",
+                    "https://upload.wikimedia.org/*",
+                ],
+            },
             "director": {
                 "provider": "asc-ai-local-qwen3",
                 "scheduler_managed": True,
