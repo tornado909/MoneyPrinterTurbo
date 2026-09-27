@@ -23,7 +23,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && python -m venv "$VIRTUAL_ENV" \
     && pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir torch torchaudio \
+    # chatterbox-multilingual pins torch/torchaudio==2.6.0. Installing those
+    # exact CPU wheels first prevents pip from replacing a newer CPU wheel with
+    # the CUDA-enabled PyPI build while resolving the git package.
+    && pip install --no-cache-dir torch==2.6.0 torchaudio==2.6.0 \
          --index-url https://download.pytorch.org/whl/cpu \
     && git clone https://github.com/travisvn/chatterbox-tts-api.git /src/chatterbox-api \
     && cd /src/chatterbox-api \
