@@ -57,6 +57,21 @@ class TestAscAIDeployment(unittest.TestCase):
             config_text + voice + controller,
         )
 
+    def test_acceptance_full_render_is_bounded_and_local_only(self):
+        source = (
+            ROOT / "scripts/asc-ai-acceptance.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"max_local_video_scenes": 0', source)
+        self.assertIn('"max_public_image_scenes": 0', source)
+        self.assertIn('"public_research_enabled": False', source)
+        self.assertIn('"bgm_type": ""', source)
+        self.assertIn('if [[ "$state" == "1" ]]', source)
+        self.assertIn('if [[ "$state" == "-1" ]]', source)
+        self.assertIn("/api/v1/asc-ai/production/$TASK_ID/evidence", source)
+        self.assertNotIn("openrouter", source.lower())
+        self.assertNotIn("ofox", source.lower())
+        self.assertNotIn("seedance", source.lower())
+
     def test_bootstrap_uploads_voice_with_russian_language_metadata(self):
         source = (
             ROOT / "scripts/bootstrap-chatterbox-ru-voice.sh"
