@@ -306,7 +306,7 @@ def production(request: Request, body: ProductionRequest):
         retryable=False,
         request_fingerprint=fingerprint,
         idempotency_scope="asc-ai-production",
-        request_params=task_request.model_dump(warnings=False),
+        request_params=task_request.model_dump(mode="json", warnings=False),
         request_stop_at="video",
     )
     if not created:
