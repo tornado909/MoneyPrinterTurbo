@@ -596,6 +596,8 @@
     "Local AI Scheduler Help": "GPU admission and model lifecycle are controlled by ASC-AI Scheduler: {scheduler}",
     "Local Production Stack": "Local Production Stack",
     "Cloud APIs Disabled": "Cloud AI APIs are disabled by strict local-only mode.",
-    "Local Production Stack Help": "MoneyPrinterTurbo will use only the local ASC-AI control plane for AI generation. No cloud AI credentials are required for this production path."
+    "Local Production Stack Help": "MoneyPrinterTurbo will use only the local ASC-AI control plane for AI generation. No cloud AI credentials are required for this production path.",
+    "Director Public Image Scenes": "Open photo scenes",
+    "Director Public Image Scenes Help": "Maximum number of factual scenes Director may source from freely licensed Wikimedia Commons images before falling back to local generation. Set 0 to disable public-media egress for this task."
   }
 }
