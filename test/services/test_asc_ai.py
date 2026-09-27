@@ -2,6 +2,8 @@ import json
 import os
 import tempfile
 import unittest
+
+import requests
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -149,6 +151,21 @@ class TestAscAIIntegration(unittest.TestCase):
             inference_call.kwargs["headers"]["X-ASC-Lease"],
             "lease-1",
         )
+
+    @patch("app.services.asc_ai_qc.requests.post")
+    def test_qc_http_error_preserves_status_and_body(self, post):
+        response = post.return_value
+        response.status_code = 502
+        response.text = '{"detail":"visual provider failed: lease mismatch"}'
+        response.raise_for_status.side_effect = requests.HTTPError("boom")
+        with self.assertRaisesRegex(
+            asc_ai_qc.QCError,
+            r"evidence analysis failed at /api/v1/evidence/analyze: HTTP 502: .*lease mismatch",
+        ):
+            asc_ai_qc.analyze_evidence(
+                "http://visual-analyzer:8095",
+                "artifact-1",
+            )
 
     def test_local_only_accepts_asc_ai_chatterbox_and_whisper(self):
         asc_ai.validate_local_only(self.params())
