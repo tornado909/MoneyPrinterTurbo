@@ -376,7 +376,12 @@ def _component_health(name: str, url: str) -> dict:
     return result
 
 
-def health(params=None, *, stop_at: str = "video") -> dict:
+def health(
+    params=None,
+    *,
+    stop_at: str = "video",
+    director_plan_ready: bool = False,
+) -> dict:
     """Check only dependencies required by the current local production path."""
     director_enabled = (
         bool(getattr(params, "director_enabled", True))
@@ -392,18 +397,16 @@ def health(params=None, *, stop_at: str = "video") -> dict:
 
     checks: list[tuple[str, str]] = []
     if director_enabled:
-        checks.extend(
-            [
-                ("scheduler", _scheduler_url() + "/health"),
-                ("prompt_llm", _prompt_llm_url() + "/health"),
-            ]
-        )
+        checks.append(("scheduler", _scheduler_url() + "/health"))
+        if not director_plan_ready:
+            checks.append(("prompt_llm", _prompt_llm_url() + "/health"))
         if str(
             getattr(params, "director_character_id", "") if params is not None else ""
         ).strip():
             checks.append(("character_hub", _character_url() + "/health"))
     needs_visuals = video_source == "asc_ai" and stop_at in {"materials", "video"}
     if needs_visuals:
+        checks.append(("scheduler", _scheduler_url() + "/health"))
         checks.append(("image_adapter", _image_url() + "/health"))
         if bool(_setting("qc_enabled", True)):
             checks.extend(
@@ -433,11 +436,20 @@ def health(params=None, *, stop_at: str = "video") -> dict:
     return result
 
 
-def preflight(params, *, stop_at: str = "video") -> dict:
+def preflight(
+    params,
+    *,
+    stop_at: str = "video",
+    director_plan_ready: bool = False,
+) -> dict:
     if not enabled():
         return {}
     validate_local_only(params)
-    return health(params, stop_at=stop_at)
+    return health(
+        params,
+        stop_at=stop_at,
+        director_plan_ready=director_plan_ready,
+    )
 
 
 def validate_local_only(params) -> None:
