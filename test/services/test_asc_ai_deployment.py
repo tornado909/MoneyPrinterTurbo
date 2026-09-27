@@ -80,6 +80,16 @@ class TestAscAIDeployment(unittest.TestCase):
         self.assertNotIn("ofox", source.lower())
         self.assertNotIn("seedance", source.lower())
 
+    def test_cost_aware_public_defaults_are_explicit(self):
+        config = tomllib.loads(
+            (ROOT / "config.example.toml").read_text(encoding="utf-8")
+        )
+        asc = config["asc_ai"]
+        self.assertTrue(asc["public_research_enabled"])
+        self.assertTrue(asc["public_media_enabled"])
+        self.assertEqual(asc["director_max_public_image_scenes"], 2)
+        self.assertFalse(asc["public_media_allow_share_alike"])
+
     def test_bootstrap_uploads_voice_with_russian_language_metadata(self):
         source = (
             ROOT / "scripts/bootstrap-chatterbox-ru-voice.sh"
