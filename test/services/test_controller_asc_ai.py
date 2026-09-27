@@ -179,7 +179,8 @@ class TestAscAIController(unittest.TestCase):
         key = "agent-run-0001"
         expected_task_id = asc_ai_controller._production_task_id(key)
 
-        def create_response(_request, _body, _stop_at, **kwargs):
+        def create_response(_request, _body, *, stop_at, **kwargs):
+            self.assertEqual(stop_at, "video")
             return {
                 "status": 200,
                 "data": {"task_id": kwargs["task_id_override"]},
