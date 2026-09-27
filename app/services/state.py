@@ -90,11 +90,16 @@ class MemoryState(BaseState):
             progress = 100
 
         with self._lock:
+            # Match RedisState HSET semantics: lifecycle updates add/replace
+            # fields without discarding durable task metadata such as
+            # queue_executor, request_fingerprint and retryability.
+            existing = self._tasks.get(task_id, {})
             self._tasks[task_id] = {
+                **copy.deepcopy(existing),
                 "task_id": task_id,
                 "state": state,
                 "progress": progress,
-                **kwargs,
+                **copy.deepcopy(kwargs),
             }
 
     def get_task(self, task_id: str):
