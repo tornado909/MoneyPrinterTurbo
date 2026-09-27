@@ -124,6 +124,36 @@ class TestMemoryState(unittest.TestCase):
         self.assertEqual(total, thread_count * tasks_per_thread)
         self.assertEqual(len(tasks), total)
 
+    def test_memory_lifecycle_updates_preserve_durable_task_metadata(self):
+        state = MemoryState()
+        state.update_task(
+            "task-meta",
+            state=const.TASK_STATE_PROCESSING,
+            progress=0,
+            queue_executor="api",
+            request_fingerprint="fingerprint",
+            retryable=False,
+        )
+        state.update_task(
+            "task-meta",
+            state=const.TASK_STATE_PROCESSING,
+            progress=40,
+            script="generated",
+        )
+        state.update_task(
+            "task-meta",
+            state=const.TASK_STATE_COMPLETE,
+            progress=100,
+            videos=["final.mp4"],
+        )
+
+        task = state.get_task("task-meta")
+        self.assertEqual(task["queue_executor"], "api")
+        self.assertEqual(task["request_fingerprint"], "fingerprint")
+        self.assertFalse(task["retryable"])
+        self.assertEqual(task["script"], "generated")
+        self.assertEqual(task["videos"], ["final.mp4"])
+
     def test_create_task_if_absent_is_atomic_for_memory_state(self):
         state = MemoryState()
 
