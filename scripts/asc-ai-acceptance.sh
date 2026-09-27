@@ -86,6 +86,7 @@ print(json.dumps({
     "max_local_video_scenes": 0,
     "max_public_image_scenes": 0,
     "public_research_enabled": False,
+    "public_media_enabled": False,
     "style": "clean realistic documentary",
     "purpose": "acceptance smoke test",
 }, ensure_ascii=False))
@@ -118,6 +119,7 @@ print(json.dumps({
     "max_local_video_scenes": 0,
     "max_public_image_scenes": 0,
     "public_research_enabled": False,
+    "public_media_enabled": False,
     "subtitle_enabled": True,
     "bgm_type": "",
     "video_count": 1,
