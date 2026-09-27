@@ -593,6 +593,117 @@ class TestAscAIIntegration(unittest.TestCase):
             "scene_narration_characters",
         )
 
+    def test_local_video_scene_uses_one_wan_job_then_local_timing_fit(self):
+        with tempfile.TemporaryDirectory() as temp_dir, (
+            patch.object(asc_ai.utils, "task_dir", return_value=temp_dir),
+            patch.object(
+                asc_ai,
+                "_image_binding",
+                return_value={
+                    "workflow_id": "image-v1",
+                    "model_id": "image-model",
+                    "default_resolution": "1024x1024",
+                },
+            ),
+            patch.object(
+                asc_ai,
+                "_video_compatibility",
+                return_value={
+                    "available": True,
+                    "compatible": True,
+                    "workflow_id": "wan_i2v_default.v1",
+                    "model_id": "wan-model",
+                    "resolution": "543x960",
+                    "target_aspect": "9:16",
+                    "aspect_log_error": 0.0,
+                    "max_aspect_log_error": 0.18,
+                    "binding": {
+                        "workflow_id": "wan_i2v_default.v1",
+                        "model_id": "wan-model",
+                        "defaults": {"length": 89},
+                    },
+                },
+            ),
+            patch.object(
+                asc_ai,
+                "generate_image",
+                return_value=str(Path(temp_dir) / "image.png"),
+            ),
+            patch.object(
+                asc_ai,
+                "quality_control",
+                return_value={
+                    "passed": True,
+                    "technical_status": "valid",
+                    "technical_score": 1.0,
+                    "semantic_score": None,
+                    "issues": [],
+                    "retry_prompt": "",
+                },
+            ),
+            patch.object(
+                asc_ai,
+                "generate_video_from_image",
+                return_value=(
+                    str(Path(temp_dir) / "wan.mp4"),
+                    {"job_id": "wan-job"},
+                ),
+            ) as generate_video,
+            patch.object(
+                asc_ai.video,
+                "fit_director_video_duration",
+                return_value=str(Path(temp_dir) / "wan.timed.mp4"),
+            ) as fit_duration,
+        ):
+            paths = asc_ai.generate_scene_materials(
+                task_id="task",
+                plan={
+                    "schema_version": "mpt.director.v3",
+                    "director_provider": "asc-ai-local-qwen3",
+                    "gpu_policy": "scheduler_managed",
+                    "scenes": [
+                        {
+                            "scene_id": "scene_01",
+                            "narration": "Длинная динамическая сцена.",
+                            "visual_strategy": "LOCAL_VIDEO",
+                            "duration_seconds": 9,
+                            "visual_prompt": "modern greenhouse",
+                            "motion_prompt": "slow camera push",
+                            "transition": "cut",
+                            "overlay_text": "",
+                        }
+                    ],
+                },
+                audio_duration=9.0,
+                aspect="9:16",
+                clip_duration=5,
+            )
+
+            self.assertEqual(paths, [str(Path(temp_dir) / "wan.timed.mp4")])
+            generate_video.assert_called_once()
+            fit_duration.assert_called_once_with(
+                str(Path(temp_dir) / "wan.mp4"),
+                str(Path(temp_dir) / "image.png"),
+                9,
+            )
+            manifest = json.loads(
+                (Path(temp_dir) / "production-manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            video_record = manifest["scenes"][0]["video"]
+            self.assertEqual(video_record["native_contract_seconds"], 5)
+            self.assertEqual(video_record["requested_scene_seconds"], 9)
+            self.assertEqual(
+                video_record["timed_path"],
+                str(Path(temp_dir) / "wan.timed.mp4"),
+            )
+            self.assertTrue(video_record["timing_adjusted"])
+            self.assertEqual(
+                manifest["scenes"][0]["effective_duration_seconds"],
+                9,
+            )
+
     def test_scene_postprocess_executes_director_transition_and_callout(self):
         with tempfile.TemporaryDirectory() as temp_dir, (
             patch.object(asc_ai.utils, "task_dir", return_value=temp_dir),
