@@ -18,6 +18,9 @@ x-asc-ai-env: &asc-ai-env
   MPT_CHATTERBOX_BASE_URL: ${MPT_CHATTERBOX_BASE_URL:-http://host.docker.internal:4123/v1}
   MPT_APP_ENABLE_REDIS: "true"
   MPT_APP_REDIS_HOST: redis
+  # Hugging Face cache is persisted on the ASC-AI host; HF_TOKEN itself is
+  # loaded from the host-only env_file below and is never stored in this repo.
+  HF_HOME: /srv/ai/cache/huggingface
 
 # Do not bind-mount the repository here. The base development compose already
 # mounts ./ over /MoneyPrinterTurbo, while docker-compose.release.yml must keep
@@ -25,6 +28,7 @@ x-asc-ai-env: &asc-ai-env
 # adds the shared ASC-AI artifact volume, so it is safe with either base file.
 x-asc-ai-volumes: &asc-ai-volumes
   - /srv/ai-data:/srv/ai-data
+  - /srv/ai/cache/huggingface:/srv/ai/cache/huggingface
 
 x-mpt-extra-hosts: &mpt-extra-hosts
   - "host.docker.internal:host-gateway"
@@ -46,6 +50,8 @@ services:
       - default
 
   webui:
+    env_file:
+      - ${ASC_AI_HF_ENV_FILE:-/opt/ai-stack/secrets/huggingface.env}
     environment: *asc-ai-env
     extra_hosts: *mpt-extra-hosts
     volumes: *asc-ai-volumes
@@ -57,6 +63,8 @@ services:
       - asc-ai
 
   api:
+    env_file:
+      - ${ASC_AI_HF_ENV_FILE:-/opt/ai-stack/secrets/huggingface.env}
     environment: *asc-ai-env
     extra_hosts: *mpt-extra-hosts
     volumes: *asc-ai-volumes
