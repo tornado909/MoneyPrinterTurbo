@@ -71,6 +71,20 @@ class TestInMemoryTaskManager(unittest.TestCase):
 
         self.assertEqual(manager.current_tasks, 0)
 
+    def test_resume_queued_tasks_fills_all_available_slots(self):
+        manager = InMemoryTaskManager(max_concurrent_tasks=3, max_queued_tasks=5)
+        manager.enqueue({"func": len, "args": ([1],), "kwargs": {}})
+        manager.enqueue({"func": len, "args": ([1, 2],), "kwargs": {}})
+        manager.enqueue({"func": len, "args": ([1, 2, 3],), "kwargs": {}})
+
+        with patch.object(manager, "execute_task") as execute_task:
+            started = manager.resume_queued_tasks()
+
+        self.assertEqual(started, 3)
+        self.assertEqual(manager.current_tasks, 3)
+        self.assertEqual(execute_task.call_count, 3)
+        self.assertTrue(manager.is_queue_empty())
+
     def test_task_done_starts_next_queued_task(self):
         """当前任务结束后应释放并发名额，并立即调度队列中的下一个任务。"""
         manager = InMemoryTaskManager(max_concurrent_tasks=1, max_queued_tasks=2)
@@ -226,6 +240,87 @@ class TestRedisTaskManager(unittest.TestCase):
             max_queued_tasks=3,
         )
         from_url.assert_called_once_with("redis://localhost:6379/0")
+
+    def test_recover_startup_resumes_queue_and_marks_only_lost_api_tasks(self):
+        queued = _queued_payload(
+            "start",
+            task_id="task-queued",
+            params=_video_params(),
+        )
+        self.redis_client.lrange.return_value = [queued]
+        self.redis_client.scan.return_value = (
+            0,
+            [b"task-queued", b"task-running", b"task-webui"],
+        )
+
+        records = {
+            (b"task-queued", "task_id"): b"task-queued",
+            (b"task-queued", "queue_executor"): b"api",
+            (b"task-queued", "state"): str(const.TASK_STATE_PROCESSING).encode(),
+            (b"task-running", "task_id"): b"task-running",
+            (b"task-running", "queue_executor"): b"api",
+            (b"task-running", "state"): str(const.TASK_STATE_PROCESSING).encode(),
+            (b"task-webui", "task_id"): b"task-webui",
+            (b"task-webui", "queue_executor"): b"webui",
+            (b"task-webui", "state"): str(const.TASK_STATE_PROCESSING).encode(),
+        }
+        self.redis_client.hget.side_effect = (
+            lambda key, field: records.get((key, field))
+        )
+
+        with (
+            patch(
+                "app.controllers.manager.redis_manager.sm.state"
+            ) as state,
+            patch.object(
+                self.manager, "resume_queued_tasks", return_value=1
+            ) as resume,
+        ):
+            state.patch_task.return_value = True
+            result = self.manager.recover_startup()
+
+        resume.assert_called_once_with()
+        self.assertEqual(result["queued"], 1)
+        self.assertEqual(result["resumed"], 1)
+        self.assertEqual(result["interrupted"], ["task-running"])
+        state.patch_task.assert_called_once()
+        call = state.patch_task.call_args
+        self.assertEqual(call.args[0], "task-running")
+        self.assertEqual(call.kwargs["state"], const.TASK_STATE_FAILED)
+        self.assertEqual(call.kwargs["failed_stage"], "startup_recovery")
+        self.assertTrue(call.kwargs["retryable"])
+        self.assertEqual(call.kwargs["recovery_action"], "resubmit")
+
+    def test_recover_startup_ignores_completed_and_legacy_unowned_tasks(self):
+        self.redis_client.lrange.return_value = []
+        self.redis_client.scan.return_value = (
+            0,
+            [b"task-complete", b"task-legacy"],
+        )
+        records = {
+            (b"task-complete", "task_id"): b"task-complete",
+            (b"task-complete", "queue_executor"): b"api",
+            (b"task-complete", "state"): str(const.TASK_STATE_COMPLETE).encode(),
+            (b"task-legacy", "task_id"): b"task-legacy",
+            (b"task-legacy", "queue_executor"): None,
+            (b"task-legacy", "state"): str(const.TASK_STATE_PROCESSING).encode(),
+        }
+        self.redis_client.hget.side_effect = (
+            lambda key, field: records.get((key, field))
+        )
+
+        with (
+            patch(
+                "app.controllers.manager.redis_manager.sm.state"
+            ) as state,
+            patch.object(
+                self.manager, "resume_queued_tasks", return_value=0
+            ),
+        ):
+            result = self.manager.recover_startup()
+
+        self.assertEqual(result["interrupted"], [])
+        state.patch_task.assert_not_called()
 
     def test_enqueue_serializes_video_params_without_mutating_task(self):
         """
