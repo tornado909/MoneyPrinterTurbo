@@ -313,6 +313,68 @@ class TestAscAIController(unittest.TestCase):
         preflight.assert_not_called()
         create_task.assert_not_called()
 
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    def test_retry_production_reuses_durable_snapshot_and_links_tasks(
+        self, preflight, create_task
+    ):
+        previous_params = asc_ai_controller.ProductionRequest(
+            video_subject="Теплица",
+            public_research_enabled=False,
+        ).to_task_request().model_dump(warnings=False)
+        create_task.return_value = {
+            "status": 200,
+            "message": "success",
+            "data": {"task_id": "task-new"},
+        }
+
+        with patch.object(asc_ai_controller.video_controller.sm, "state") as state:
+            state.get_task.return_value = {
+                "task_id": "task-old",
+                "retryable": True,
+                "request_params": previous_params,
+                "request_stop_at": "video",
+            }
+            state.patch_task.return_value = True
+            response = self.client.post(
+                "/api/v1/asc-ai/production/task-old/retry",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["task_id"], "task-new")
+        task_request = preflight.call_args.args[0]
+        self.assertEqual(task_request.video_source, "asc_ai")
+        self.assertFalse(task_request.director_public_research_enabled)
+        create_task.assert_called_once()
+        self.assertEqual(
+            create_task.call_args.kwargs["state_metadata"]["retry_of"],
+            "task-old",
+        )
+        state.patch_task.assert_called_once_with(
+            "task-old",
+            retried_as="task-new",
+            retryable=False,
+            recovery_action="resubmitted",
+        )
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    def test_retry_production_rejects_non_retryable_task(
+        self, preflight, create_task
+    ):
+        with patch.object(asc_ai_controller.video_controller.sm, "state") as state:
+            state.get_task.return_value = {
+                "task_id": "task-old",
+                "retryable": False,
+            }
+            response = self.client.post(
+                "/api/v1/asc-ai/production/task-old/retry",
+            )
+
+        self.assertEqual(response.status_code, 409)
+        preflight.assert_not_called()
+        create_task.assert_not_called()
+
     def test_production_request_rejects_preset_without_local_filename(self):
         response = self.client.post(
             "/api/v1/asc-ai/production",
