@@ -60,8 +60,8 @@ Commons используется только для подходящих reusab
     git clone https://github.com/tornado909/MoneyPrinterTurbo.git
     cd MoneyPrinterTurbo
     cp config.example.toml config.toml
-    # Production: pull ghcr.io/tornado909/moneyprinterturbo:latest
-    docker compose -f docker-compose.release.yml -f docker-compose.asc-ai.yml -f docker-compose.chatterbox.yml up -d --build
+    # Production: pull fork image first; build this checkout if GHCR has no image yet.
+    docker compose -f docker-compose.release.yml -f docker-compose.asc-ai.yml -f docker-compose.chatterbox.yml up -d
     bash scripts/bootstrap-chatterbox-ru-voice.sh /path/to/russian-reference.wav
 
 Для разработки из текущего checkout замените `docker-compose.release.yml` на `docker-compose.yml`. ASC-AI override намеренно **не** монтирует `./:/MoneyPrinterTurbo`: source bind принадлежит только dev-base, поэтому release-base не может быть незаметно перекрыт локальным кодом.
