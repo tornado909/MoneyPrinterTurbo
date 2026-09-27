@@ -472,6 +472,9 @@ def retry_production(request: Request, task_id: str):
             task_request,
             stop_at="video",
             director_plan_ready=reusable_plan is not None,
+            narration_audio_ready=video_controller.tm._retry_audio_available(
+                task_id
+            ),
         )
     except asc_ai.AscAIError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
