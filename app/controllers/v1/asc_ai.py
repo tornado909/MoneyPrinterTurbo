@@ -456,8 +456,23 @@ def retry_production(request: Request, task_id: str):
             status_code=409,
             detail=f"saved task parameters are stale or invalid: {exc}",
         ) from exc
+    reusable_plan = None
     try:
-        asc_ai.preflight(task_request, stop_at="video")
+        reusable_plan = asc_ai.load_director_plan(task_id)
+    except asc_ai.AscAIError:
+        reusable_plan = None
+    if reusable_plan:
+        requested_script = str(task_request.video_script or "").strip()
+        resumed_script = str(reusable_plan.get("script") or "").strip()
+        if requested_script and requested_script != resumed_script:
+            reusable_plan = None
+
+    try:
+        asc_ai.preflight(
+            task_request,
+            stop_at="video",
+            director_plan_ready=reusable_plan is not None,
+        )
     except asc_ai.AscAIError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
