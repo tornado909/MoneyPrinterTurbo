@@ -622,10 +622,16 @@ def retry_production(request: Request, task_id: str):
             },
         )
 
-    return video_controller.create_task(
+    result = video_controller.create_task(
         request,
         task_request,
         stop_at="video",
         task_id_override=retry_task_id,
         initial_state_claimed=True,
     )
+    sm.state.patch_task(
+        task_id,
+        last_retry_task_id=retry_task_id,
+        recovery_action="retry_queued",
+    )
+    return result
