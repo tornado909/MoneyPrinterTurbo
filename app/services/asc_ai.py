@@ -612,6 +612,44 @@ def enrich_director_plan(plan: dict) -> dict:
     return result
 
 
+def load_director_plan(task_id: str) -> dict | None:
+    task_root = Path(utils.task_dir(task_id)).resolve()
+    target = (task_root / "director-plan.json").resolve()
+    try:
+        target.relative_to(task_root)
+    except ValueError as exc:
+        raise AscAIError("unsafe Director resume path") from exc
+    if not target.is_file():
+        return None
+    try:
+        plan = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise AscAIError("saved Director plan is unreadable") from exc
+    if not isinstance(plan, dict):
+        raise AscAIError("saved Director plan is invalid")
+    if not plan.get("local_only") or not isinstance(plan.get("scenes"), list):
+        raise AscAIError("saved Director plan is not a reusable local plan")
+    if not str(plan.get("script") or "").strip():
+        raise AscAIError("saved Director plan has no script")
+    return plan
+
+
+def load_production_manifest(task_id: str) -> dict | None:
+    task_root = Path(utils.task_dir(task_id)).resolve()
+    target = (task_root / "production-manifest.json").resolve()
+    try:
+        target.relative_to(task_root)
+    except ValueError as exc:
+        raise AscAIError("unsafe production resume path") from exc
+    if not target.is_file():
+        return None
+    try:
+        manifest = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise AscAIError("saved production manifest is unreadable") from exc
+    return manifest if isinstance(manifest, dict) else None
+
+
 def persist_director_plan(task_id: str, plan: dict) -> str:
     target = Path(utils.task_dir(task_id)) / "director-plan.json"
     target.parent.mkdir(parents=True, exist_ok=True)
