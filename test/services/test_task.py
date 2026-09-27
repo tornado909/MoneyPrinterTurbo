@@ -351,6 +351,8 @@ class TestTaskService(unittest.TestCase):
         self.assertEqual(result["videos"], ["final.mp4"])
         final_params = final.call_args.args[1]
         self.assertEqual(final_params.video_concat_mode, VideoConcatMode.sequential)
+        self.assertEqual(final_params.video_clip_speed, 1.0)
+        self.assertIsNone(final_params.video_transition_mode)
         self.assertEqual(final_params.video_clip_duration, 8)
 
     def test_run_pipeline_fails_fast_when_ffmpeg_is_not_ready(self):
