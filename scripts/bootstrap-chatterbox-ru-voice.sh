@@ -18,7 +18,7 @@ fi
 echo "Checking Chatterbox health at $BASE_URL ..."
 curl -fsS "$BASE_URL/health" >/dev/null
 
-if curl -fsS "$BASE_URL/v1/voices" | python3 -c '
+if curl -fsS "$BASE_URL/v1/voices" | CHATTERBOX_RU_VOICE_NAME="$VOICE_NAME" python3 -c '
 import json, os, sys
 name=os.environ.get("CHATTERBOX_RU_VOICE_NAME","ru-default")
 data=json.load(sys.stdin)
