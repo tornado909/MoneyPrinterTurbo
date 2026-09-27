@@ -337,7 +337,7 @@ def _normalize(raw: dict, params) -> dict:
             used_video += 1
         else:
             strategy = "LOCAL_IMAGE"
-        effective_duration = 5 if strategy == "LOCAL_VIDEO" else row.duration_seconds
+        effective_duration = row.duration_seconds
         scenes.append(
             {
                 "scene_id": row.scene_id or f"scene_{index:02d}",
@@ -496,10 +496,10 @@ Return one JSON object with:
 - production_notes: short array of global consistency rules.
 
 Visual prompts must be descriptive English prompts suitable for local
-Krea/Lustify generation. Use LOCAL_VIDEO only when motion materially improves storytelling. Every
-LOCAL_VIDEO scene must use duration_seconds=5 because the local Wan production
-profile renders native five-second clips. Preserve character/object/environment
-continuity across scenes.
+Krea/Lustify generation. Use LOCAL_VIDEO only when motion materially improves storytelling. The local
+Wan production profile renders one validated five-second native clip; downstream
+editing may trim or hold the approved source to match the requested scene
+duration. Preserve character/object/environment continuity across scenes.
 Never request generated text, logos or watermarks inside imagery. Keep
 overlay_text empty unless a short on-screen callout materially improves the
 scene; when used, keep it concise (roughly 2-6 words) in the narration language.
