@@ -459,17 +459,21 @@ def _sync_chatterbox_config_from_session_state():
     # “试听语音合成”按钮之后。如果试听时只读取 config.chatterbox，可能拿不到
     # 用户刚在输入框里填入的 base_url/model/voices。先从 session_state 同步一次，
     # 可以保证按钮逻辑和输入框显示逻辑使用同一份最新配置。
-    _set_runtime_config(
-        "chatterbox",
-        "base_url",
-        (
-            st.session_state.get(
-                "chatterbox_base_url_input",
-                config.chatterbox.get("base_url") or DEFAULT_CHATTERBOX_BASE_URL,
-            )
-            or ""
-        ).strip(),
-    )
+    runtime_chatterbox_base_url = (
+        os.getenv("MPT_CHATTERBOX_BASE_URL") or ""
+    ).strip()
+    if not runtime_chatterbox_base_url:
+        _set_runtime_config(
+            "chatterbox",
+            "base_url",
+            (
+                st.session_state.get(
+                    "chatterbox_base_url_input",
+                    config.chatterbox.get("base_url") or DEFAULT_CHATTERBOX_BASE_URL,
+                )
+                or ""
+            ).strip(),
+        )
     _set_runtime_config(
         "chatterbox",
         "api_key",
@@ -1886,17 +1890,23 @@ def tr_optional(key, fallback_language=""):
     return value if value else ""
 
 
-def render_onboarding_tour():
-    # 引导只覆盖三个稳定入口，不尝试控制 Dialog、Tabs 或业务表单。这样既能让
-    # 新用户理解完整流程，也不会把引导状态与 Streamlit 的动态组件生命周期耦合。
-    steps = [
-        Tour.bind(
-            "open_settings_dialog_button",
-            title=tr("Onboarding Model Settings Title"),
-            desc=tr("Onboarding Model Settings Description"),
-            side="bottom",
-            align="end",
-        ),
+def render_onboarding_tour(video_source=""):
+    # ASC-AI Director owns its local LLM through the Scheduler, so sending a
+    # first-run user to the cloud-provider/API-key dialog is actively
+    # misleading. Keep that step only for provider-backed production modes.
+    steps = []
+    if video_source != "asc_ai":
+        steps.append(
+            Tour.bind(
+                "open_settings_dialog_button",
+                title=tr("Onboarding Model Settings Title"),
+                desc=tr("Onboarding Model Settings Description"),
+                side="bottom",
+                align="end",
+            )
+        )
+    steps.extend(
+        [
         Tour.bind(
             "main_settings_grid",
             title=tr("Onboarding Creation Settings Title"),
@@ -1911,7 +1921,8 @@ def render_onboarding_tour():
             side="top",
             align="center",
         ),
-    ]
+        ]
+    )
 
     # streamlit-tour 1.1.0 没有在 Python 构造参数中暴露导航文案，但底层
     # Driver.js 支持在每一步的 popover 配置中覆盖按钮文本。这里统一注入本地化
@@ -7700,16 +7711,22 @@ def _render_audio_settings(panel, params):
                 selected_tts_server == "chatterbox"
                 or (voice_name and voice.is_chatterbox_voice(voice_name))
             ):
+                runtime_chatterbox_base_url = (
+                    os.getenv("MPT_CHATTERBOX_BASE_URL") or ""
+                ).strip()
                 chatterbox_base_url = st.text_input(
                     tr("Chatterbox Base URL"),
-                    value=config.chatterbox.get("base_url")
+                    value=runtime_chatterbox_base_url
+                    or config.chatterbox.get("base_url")
                     or DEFAULT_CHATTERBOX_BASE_URL,
                     key="chatterbox_base_url_input",
                     placeholder=tr("Chatterbox Base URL Placeholder"),
+                    disabled=bool(runtime_chatterbox_base_url),
                 )
-                _set_runtime_config(
-                    "chatterbox", "base_url", (chatterbox_base_url or "").strip()
-                )
+                if not runtime_chatterbox_base_url:
+                    _set_runtime_config(
+                        "chatterbox", "base_url", (chatterbox_base_url or "").strip()
+                    )
 
                 chatterbox_api_key = st.text_input(
                     tr("Chatterbox API Key"),
@@ -8251,7 +8268,7 @@ def _render_generation_controls(
         key="generate_video_button",
         on_click=_prepare_generation_task,
     )
-    render_onboarding_tour()
+    render_onboarding_tour(params.video_source)
     if start_button:
         _save_runtime_config()
         task_id = st.session_state.get("pending_generation_task_id") or str(uuid4())
@@ -8293,6 +8310,7 @@ def _render_generation_controls(
             voxcpm_prompt_text = _get_voxcpm_prompt_text()
 
         if params.video_source not in [
+            "asc_ai",
             "pexels",
             "pixabay",
             "coverr",
