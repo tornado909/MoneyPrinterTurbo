@@ -214,10 +214,16 @@ def capabilities(request: Request):
                 "scheduler_managed": True,
                 "structured_scene_plan": True,
                 "public_research_optional": True,
+                "public_research_default": bool(
+                    config.asc_ai.get("public_research_enabled", True)
+                ),
             },
             "image": {
                 "adapter": "asc-ai-image-adapter",
                 "public_media": "wikimedia-commons",
+                "public_media_default": bool(
+                    config.asc_ai.get("public_media_enabled", True)
+                ),
                 "public_media_local_fallback": True,
                 "character_hub": True,
                 "identity_reference": True,
@@ -235,6 +241,15 @@ def capabilities(request: Request):
                 "queued": True,
                 "uses_shared_task_manager": True,
                 "persistent_idempotency_header": "Idempotency-Key",
+                "final_qc_enabled": bool(
+                    config.asc_ai.get("final_qc_enabled", True)
+                ),
+                "final_qc_required": bool(
+                    config.asc_ai.get("final_qc_required", True)
+                ),
+                "final_qc_visual_analysis": bool(
+                    config.asc_ai.get("final_qc_visual_analysis", True)
+                ),
             },
             "artifacts": {
                 "evidence_template": "/api/v1/asc-ai/production/{task_id}/evidence",
