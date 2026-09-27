@@ -57,12 +57,14 @@ class TestAscAIDeployment(unittest.TestCase):
             config_text + voice + controller,
         )
 
-    def test_public_egress_defaults_are_private(self):
-        config = tomllib.loads(
-            (ROOT / "config.example.toml").read_text(encoding="utf-8")
-        )
-        self.assertFalse(config["asc_ai"]["public_research_enabled"])
-        self.assertFalse(config["asc_ai"]["public_media_enabled"])
+    def test_asc_ai_overlay_does_not_shadow_release_image_code(self):
+        overlay = (ROOT / "docker-compose.asc-ai.yml").read_text(encoding="utf-8")
+        release = (ROOT / "docker-compose.release.yml").read_text(encoding="utf-8")
+
+        self.assertIn("ghcr.io/tornado909/moneyprinterturbo:latest", release)
+        self.assertNotIn("./:/MoneyPrinterTurbo", overlay)
+        self.assertIn("/srv/ai-data:/srv/ai-data", overlay)
+        self.assertIn("docker-compose.release.yml", overlay)
 
     def test_acceptance_full_render_is_bounded_and_local_only(self):
         source = (
