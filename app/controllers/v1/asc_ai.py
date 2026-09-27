@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal
 from uuid import NAMESPACE_URL, uuid5
@@ -53,6 +54,25 @@ def _retry_task_id(task_id: str) -> str:
             "moneyprinterturbo:asc-ai:retry:" + str(task_id),
         )
     )
+
+
+def _read_task_json_artifact(task_id: str, filename: str):
+    task_root = Path(utils.task_dir(task_id)).resolve()
+    target = (task_root / filename).resolve()
+    try:
+        target.relative_to(task_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="unsafe task artifact path") from exc
+    if not target.is_file():
+        return None
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"task artifact {filename} is unreadable",
+        ) from exc
+    return payload
 
 
 def _idempotent_replay_or_conflict(
@@ -203,8 +223,11 @@ def capabilities(request: Request):
                 "persistent_idempotency_header": "Idempotency-Key",
             },
             "artifacts": {
+                "evidence_template": "/api/v1/asc-ai/production/{task_id}/evidence",
                 "director_plan": "director-plan.json",
+                "director_execution_plan": "director-execution-plan.json",
                 "production_manifest": "production-manifest.json",
+                "public_media_credits": "public-media-credits.json",
             },
         },
     )
@@ -339,6 +362,41 @@ def production(request: Request, body: ProductionRequest):
     )
 
 
+
+
+
+@router.get(
+    "/asc-ai/production/{task_id}/evidence",
+    summary="Read structured Director and production evidence for a task",
+)
+def production_evidence(request: Request, task_id: str):
+    task = video_controller.sm.state.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="task not found")
+
+    names = {
+        "director_plan": "director-plan.json",
+        "director_execution_plan": "director-execution-plan.json",
+        "production_manifest": "production-manifest.json",
+        "public_media_credits": "public-media-credits.json",
+    }
+    artifacts = {
+        key: _read_task_json_artifact(task_id, filename)
+        for key, filename in names.items()
+    }
+    return utils.get_response(
+        200,
+        {
+            "task_id": task_id,
+            "state": task.get("state"),
+            "progress": task.get("progress", 0),
+            "failed_stage": task.get("failed_stage"),
+            "error": task.get("error"),
+            "retryable": bool(task.get("retryable", False)),
+            "retried_as": task.get("retried_as"),
+            "artifacts": artifacts,
+        },
+    )
 
 @router.post(
     "/asc-ai/production/{task_id}/retry",
