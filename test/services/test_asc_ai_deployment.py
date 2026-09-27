@@ -59,6 +59,11 @@ class TestAscAIDeployment(unittest.TestCase):
             config_text + voice + controller,
         )
 
+    def test_webui_registers_asc_ai_runtime_config_section(self):
+        source = (ROOT / "webui/Main.py").read_text(encoding="utf-8")
+        self.assertIn('"asc_ai": config.asc_ai', source)
+        self.assertIn('_set_runtime_config(', source)
+
     def test_main_dockerfile_uses_bookworm_and_never_reintroduces_bullseye(self):
         source = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("FROM python:3.11-slim-bookworm", source)
