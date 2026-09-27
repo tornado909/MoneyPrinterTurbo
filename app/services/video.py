@@ -1530,6 +1530,119 @@ def generate_video(
         return bgm_mix_succeeded
 
 
+_DIRECTOR_TRANSITIONS = {
+    "cut",
+    "fade_in",
+    "fade_out",
+    "slide_in",
+    "slide_out",
+    "zoom_in",
+    "zoom_out",
+}
+
+
+def _apply_director_transition(clip, transition: str):
+    value = str(transition or "cut").strip().lower()
+    if value not in _DIRECTOR_TRANSITIONS:
+        raise ValueError(f"unsupported Director transition: {transition}")
+    if value == "cut":
+        return clip
+
+    edge_duration = min(0.5, max(0.15, float(clip.duration or 0) / 4.0))
+    if value == "fade_in":
+        return video_effects.fadein_transition(clip, edge_duration)
+    if value == "fade_out":
+        return video_effects.fadeout_transition(clip, edge_duration)
+    if value == "slide_in":
+        return video_effects.slidein_transition(clip, edge_duration, "left")
+    if value == "slide_out":
+        return video_effects.slideout_transition(clip, edge_duration, "right")
+    if value == "zoom_in":
+        return video_effects.zoomin_transition(clip, edge_duration)
+    if value == "zoom_out":
+        return video_effects.zoomout_transition(clip, edge_duration)
+    return clip
+
+
+def render_director_scene_effects(
+    video_path: str,
+    *,
+    transition: str = "cut",
+    overlay_text: str = "",
+    font_name: str = "MicrosoftYaHeiBold.ttc",
+) -> str:
+    """Bake Director transition/callout into one already-rendered scene clip."""
+    transition = str(transition or "cut").strip().lower()
+    overlay_text = str(overlay_text or "").strip()[:160]
+    if transition == "cut" and not overlay_text:
+        return video_path
+
+    source_path = Path(video_path)
+    if not source_path.is_file():
+        raise FileNotFoundError(video_path)
+    output_path = source_path.with_name(source_path.stem + ".director.mp4")
+
+    with ExitStack() as stack:
+        source = stack.enter_context(_open_video_clip_quietly(str(source_path)))
+        working = source
+
+        if transition != "cut":
+            transformed = _apply_director_transition(working, transition)
+            if transformed is not working:
+                stack.callback(transformed.close)
+            working = transformed
+
+        if overlay_text:
+            font_path = utils.font_dir(font_name)
+            if not os.path.isfile(font_path):
+                font_path = utils.font_dir("STHeitiMedium.ttc")
+            font_size = max(28, min(72, int(source.w * 0.045)))
+            text_clip = TextClip(
+                text=overlay_text,
+                font=font_path,
+                font_size=font_size,
+                color="#FFFFFF",
+                bg_color=None,
+                stroke_color="#000000",
+                stroke_width=2,
+                size=(max(200, int(source.w * 0.82)), None),
+                text_align="center",
+                margin=(12, 10),
+            )
+            stack.callback(text_clip.close)
+            callout_duration = min(
+                max(1.0, float(source.duration or 0) * 0.5),
+                3.5,
+                max(1.0, float(source.duration or 0)),
+            )
+            callout_start = min(
+                0.25,
+                max(0.0, float(source.duration or 0) - callout_duration),
+            )
+            callout = (
+                text_clip.with_start(callout_start)
+                .with_duration(callout_duration)
+                .with_position(("center", max(20, int(source.h * 0.10))))
+            )
+            stack.callback(callout.close)
+            composite = CompositeVideoClip(
+                [working, callout],
+                size=working.size,
+            ).with_duration(working.duration)
+            stack.callback(composite.close)
+            working = composite
+
+        _write_videofile_with_codec_fallback(
+            working,
+            str(output_path),
+            codec=_get_configured_video_codec(),
+            audio=False,
+            fps=fps,
+            logger=None,
+        )
+    return str(output_path)
+
+
 def render_image_zoom_video(image_path: str, clip_duration: int = 5) -> str:
     """
     将单张本地图片渲染为带缓慢放大效果的 mp4 片段，返回输出文件路径。
