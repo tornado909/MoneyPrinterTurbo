@@ -609,14 +609,28 @@ Return one JSON object with:
   and a short overlay_text callout;
 - production_notes: short array of global consistency rules.
 
+Visual routing policy:
+1. Prefer PUBLIC_IMAGE when the narration refers to a real, broadly documented
+   place, object, machine, plant, animal, historical artifact or scientific
+   subject that is likely to have a useful Wikimedia Commons photograph.
+   public_media_query must be a concise English factual noun phrase, not an art
+   prompt. Never use PUBLIC_IMAGE for the recurring Character Hub identity.
+2. Use LOCAL_IMAGE as the default for controlled composition, abstract ideas,
+   branded/story-specific scenes, recurring characters, unusual combinations,
+   or when a public photo would not express the narration precisely.
+3. Spend LOCAL_VIDEO only when motion itself carries information or creates a
+   clear hero moment. Do not use it merely to make a still subject move. Respect
+   the LOCAL_VIDEO budget exactly.
+
 Visual prompts must be descriptive English prompts suitable for local
-Krea/Lustify generation. Use LOCAL_VIDEO only when motion materially improves storytelling. The local
-Wan production profile renders one validated five-second native clip; downstream
-editing may trim or hold the approved source to match the requested scene
-duration. Preserve character/object/environment continuity across scenes.
-Never request generated text, logos or watermarks inside imagery. Keep
-overlay_text empty unless a short on-screen callout materially improves the
-scene; when used, keep it concise (roughly 2-6 words) in the narration language.
+Krea/Lustify generation. The local Wan production profile renders one validated
+five-second native clip; downstream editing may trim or hold the approved source
+to match the requested scene duration. Preserve character/object/environment
+continuity across scenes. Default transition is cut; use a stylized transition
+only when it supports the edit, not on every scene. Never request generated
+text, logos or watermarks inside imagery. Keep overlay_text empty unless a short
+on-screen callout materially improves the scene; when used, keep it concise
+(roughly 2-6 words) in the narration language.
 """.strip()
     runtime = SchedulerManagedLocalLLM(
         scheduler_url,
