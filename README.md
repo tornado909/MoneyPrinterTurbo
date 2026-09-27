@@ -15,7 +15,8 @@
 - **Director по умолчанию:** локальный Qwen3-8B создаёт typed production-ready scene plan; malformed JSON получает одну bounded repair-попытку, а public MediaWiki research кэшируется и при необходимости добирается из fallback-языка без платного AI API.
 - **Никакого прямого ComfyUI:** изображения и I2V идут только через ASC-AI Image Adapter.
 - **GPU Scheduler обязателен:** Director получает lease перед локальным LLM inference; Krea/Lustify, Wan и Qwen3-VL используют существующий ASC-AI control plane.
-- **Строгий local-only:** облачные LLM/TTS/image/video/music providers и автоматическая сторонняя публикация блокируются в production-пути.
+- **Строгий local-only:** облачные LLM/TTS/image/video/music providers и автоматическая сторонняя публикация блокируются в production-пути; внутренние service URL не могут быть подменены внешним доменом.
+- **Zero-public-egress по умолчанию:** Wikipedia research и Wikimedia visual search выключены. Их можно явно разрешить отдельно для конкретной задачи; AI-инференс при этом всё равно остаётся локальным.
 - **Локальный QC:** Prompt Intelligence регистрирует каждый артефакт; adaptive policy не грузит Qwen3-VL для каждого still, но всегда анализирует Wan-видео, Character Hub сцены, retries и контрольные кадры.
 - **Экономия GPU:** большая часть сцен может быть статичной генерацией + лёгким zoom/pan; bounded `PUBLIC_IMAGE` сцены реально обходят diffusion через лицензированные Wikimedia Commons материалы с local fallback; число Wan I2V сцен задаётся Director budget, а несовместимый aspect ratio отсекается до GPU enqueue.
 - **Character Hub continuity:** Director может закрепить одного canonical персонажа между сценами через reference artifacts/LoRA из ASC-AI Character Hub.
@@ -83,7 +84,8 @@ http://127.0.0.1:8080/docs
 - общий визуальный стиль;
 - целевая аудитория;
 - цель ролика;
-- необязательный public research;
+- необязательный public research (явный opt-in);
+- необязательный Wikimedia visual search (отдельный явный opt-in);
 - необязательный canonical персонаж из Character Hub.
 
 Director возвращает структурированный план:
@@ -129,6 +131,7 @@ Redis сохраняет queued jobs и durable JSON-safe snapshot запрос�
 При `[asc_ai] local_only = true`:
 
 - нельзя случайно уйти в OpenAI/OpenRouter/Claude/Kimi и другие cloud LLM;
+- ASC-AI service endpoints принимаются только на loopback/private/link-local, встроенных Docker-hostnames, `*.local` или явно перечисленных `local_service_hosts`;
 - нельзя выбрать платный cloud video/image provider;
 - нельзя выбрать cloud TTS;
 - нельзя использовать удалённую AI-музыку;
@@ -136,6 +139,8 @@ Redis сохраняет queued jobs и durable JSON-safe snapshot запрос�
 - если Director отключён, требуется готовый пользовательский сценарий.
 
 Допустимы локальные материалы и локальная музыка.
+
+Публичный HTTP тоже **запрещён по умолчанию на уровне продукта**. В WebUI у Director есть отдельные opt-in переключатели для Wikipedia/MediaWiki и Wikimedia Commons. Разрешение записывается в параметры конкретной queued task и в `director-plan.json → public_egress`, поэтому последующее изменение UI не меняет уже поставленную задачу.
 
 ## Локальная озвучка
 
