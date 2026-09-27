@@ -21,7 +21,7 @@
 - **Character Hub continuity:** Director может закрепить одного canonical персонажа между сценами через reference artifacts/LoRA из ASC-AI Character Hub.
 - **Production manifest:** для каждой задачи сохраняется `production-manifest.json` с Scheduler job/stage/lease, seed/settings, artifact IDs, QC, fallback и фактическими выходами.
 - **Headless API:** ASC-AI агент может планировать и запускать полный render через отдельный `/api/v1/asc-ai/*` namespace без знания внутреннего `VideoParams`.
-- **Устойчивое ASC-AI-развёртывание:** production overlay включает Redis с AOF для очереди/состояний задач.
+- **Устойчивое ASC-AI-развёртывание:** production overlay включает Redis с AOF; queued API jobs возобновляются после рестарта, а оборванные in-flight jobs становятся явно retryable вместо вечного `processing`.
 - Китайский README upstream сохранён как `README-upstream-zh.md` для удобной синхронизации.
 
 ## Что нужно локально
