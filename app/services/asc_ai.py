@@ -1435,6 +1435,157 @@ def persist_production_manifest(task_id: str, manifest: dict) -> str:
     return str(target)
 
 
+def _inspect_final_video(media_path: str, expected_duration: float) -> dict:
+    """Perform cheap CPU-side validation before optional VLM final QA."""
+    source = Path(media_path)
+    if not source.is_file() or source.stat().st_size <= 0:
+        return {
+            "passed": False,
+            "issues": ["final video is missing or empty"],
+            "duration_seconds": None,
+            "width": None,
+            "height": None,
+            "has_audio": False,
+            "size_bytes": 0,
+        }
+
+    try:
+        with video._open_video_clip_quietly(str(source), audio=True) as clip:
+            duration = float(clip.duration or 0.0)
+            width = int(getattr(clip, "w", 0) or 0)
+            height = int(getattr(clip, "h", 0) or 0)
+            has_audio = getattr(clip, "audio", None) is not None
+    except Exception as exc:
+        return {
+            "passed": False,
+            "issues": [f"final video could not be opened: {type(exc).__name__}"],
+            "duration_seconds": None,
+            "width": None,
+            "height": None,
+            "has_audio": False,
+            "size_bytes": int(source.stat().st_size),
+        }
+
+    issues: list[str] = []
+    if duration <= 0:
+        issues.append("final video has no positive duration")
+    if width <= 0 or height <= 0:
+        issues.append("final video has invalid frame dimensions")
+    if not has_audio:
+        issues.append("final video has no audio stream")
+
+    expected = max(0.0, float(expected_duration or 0.0))
+    if expected > 0 and duration > 0:
+        tolerance = max(1.5, expected * 0.08)
+        if abs(duration - expected) > tolerance:
+            issues.append(
+                "final video duration differs from narration by more than "
+                f"{tolerance:.2f}s"
+            )
+
+    return {
+        "passed": not issues,
+        "issues": issues,
+        "duration_seconds": round(duration, 3),
+        "width": width,
+        "height": height,
+        "has_audio": has_audio,
+        "size_bytes": int(source.stat().st_size),
+    }
+
+
+def persist_final_quality_report(task_id: str, report: dict) -> str:
+    target = Path(utils.task_dir(task_id)) / "final-qc.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".json.partial")
+    temporary.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    os.replace(temporary, target)
+    return str(target)
+
+
+def final_quality_control(
+    task_id: str,
+    video_paths: list[str],
+    *,
+    expected_duration: float,
+) -> dict:
+    """Validate assembled ASC-AI outputs before the task becomes COMPLETE.
+
+    The structural probe is CPU-only and always checks decodability, dimensions,
+    duration and the narration audio stream. A single local Visual Analyzer pass
+    per final output is optional and never triggers an automatic re-render.
+    """
+    required = bool(_setting("final_qc_required", True))
+    visual_analysis = bool(_setting("final_qc_visual_analysis", True))
+    enabled = bool(_setting("final_qc_enabled", True))
+    report = {
+        "schema_version": "mpt.final-qc.v1",
+        "task_id": task_id,
+        "enabled": enabled,
+        "required": required,
+        "visual_analysis": visual_analysis,
+        "expected_duration_seconds": round(float(expected_duration or 0.0), 3),
+        "passed": True,
+        "status": "skipped" if not enabled else "running",
+        "outputs": [],
+    }
+
+    if not enabled:
+        persist_final_quality_report(task_id, report)
+        return report
+
+    for index, media_path in enumerate(video_paths, start=1):
+        structural = _inspect_final_video(media_path, expected_duration)
+        row = {
+            "video_index": index,
+            "file_name": Path(media_path).name,
+            "structural": structural,
+            "visual_qc": None,
+            "passed": bool(structural.get("passed")),
+        }
+        if row["passed"] and visual_analysis:
+            try:
+                visual_qc = quality_control(
+                    task_id,
+                    {
+                        "scene_id": f"final_{index:02d}",
+                        "visual_prompt": "final assembled production video",
+                    },
+                    media_path,
+                    media_kind="final_video",
+                    run_visual_analysis=True,
+                )
+                row["visual_qc"] = visual_qc
+                row["passed"] = bool(visual_qc.get("passed"))
+            except AscAIError as exc:
+                row["visual_qc"] = {
+                    "passed": False,
+                    "issues": [str(exc)],
+                    "provider": None,
+                }
+                row["passed"] = False
+        report["outputs"].append(row)
+
+    report["passed"] = bool(report["outputs"]) and all(
+        bool(row.get("passed")) for row in report["outputs"]
+    )
+    report["status"] = "passed" if report["passed"] else "failed"
+    persist_final_quality_report(task_id, report)
+
+    if required and not report["passed"]:
+        issues: list[str] = []
+        for row in report["outputs"]:
+            if row.get("passed"):
+                continue
+            issues.extend(str(x) for x in (row.get("structural") or {}).get("issues", []))
+            issues.extend(str(x) for x in (row.get("visual_qc") or {}).get("issues", []))
+        detail = "; ".join(dict.fromkeys(issues)) or "final video did not pass QC"
+        raise AscAIError(f"final production QC failed: {detail}")
+    return report
+
+
 def generate_scene_materials(
     task_id: str,
     plan: dict,
