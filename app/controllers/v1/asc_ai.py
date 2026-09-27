@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal
 from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import Depends, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError, model_validator
@@ -15,8 +16,10 @@ from app.config import config
 from app.controllers import base
 from app.controllers.v1 import video as video_controller
 from app.controllers.v1.base import new_router
+from app.models import const
 from app.models.schema import TaskVideoRequest
 from app.services import asc_ai
+from app.services import state as sm
 from app.services import state as sm
 from app.utils import utils
 
@@ -537,3 +540,92 @@ def retry_production(request: Request, task_id: str):
     )
     return response
 
+
+
+@router.post(
+    "/asc-ai/tasks/{task_id}/retry",
+    summary="Idempotently retry an interrupted ASC-AI production task",
+)
+def retry_production(request: Request, task_id: str):
+    original = sm.state.get_task(task_id)
+    if not original:
+        raise HTTPException(status_code=404, detail="task not found")
+
+    try:
+        original_state = int(original.get("state"))
+    except (TypeError, ValueError):
+        original_state = None
+    if original_state != const.TASK_STATE_FAILED or not bool(
+        original.get("retryable", False)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="task is not marked retryable",
+        )
+
+    params_payload = original.get("request_params")
+    stop_at = str(original.get("request_stop_at") or "video")
+    if stop_at != "video" or not isinstance(params_payload, dict):
+        raise HTTPException(
+            status_code=409,
+            detail="task has no replayable video request",
+        )
+    try:
+        task_request = TaskVideoRequest.model_validate(params_payload)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="stored task parameters no longer pass validation",
+        ) from exc
+    if task_request.video_source != "asc_ai" or not task_request.director_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="stored task is not an ASC-AI Director production request",
+        )
+
+    retry_task_id = uuid5(
+        NAMESPACE_URL,
+        f"moneyprinterturbo:asc-ai:retry:{task_id}",
+    ).hex
+    existing_retry = sm.state.get_task(retry_task_id)
+    if existing_retry:
+        return utils.get_response(
+            200,
+            {
+                "task_id": retry_task_id,
+                "retry_of": task_id,
+                "already_created": True,
+            },
+        )
+
+    try:
+        asc_ai.preflight(task_request, stop_at="video")
+    except asc_ai.AscAIError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    claimed = sm.state.create_task_if_absent(
+        retry_task_id,
+        queue_executor="api",
+        retryable=False,
+        request_params=task_request.model_dump(mode="json", warnings=False),
+        request_stop_at="video",
+        retry_of=task_id,
+        recovery_generation=int(original.get("recovery_generation") or 0) + 1,
+    )
+    if not claimed:
+        return utils.get_response(
+            200,
+            {
+                "task_id": retry_task_id,
+                "retry_of": task_id,
+                "already_created": True,
+            },
+        )
+
+    return video_controller.create_task(
+        request,
+        task_request,
+        stop_at="video",
+        task_id_override=retry_task_id,
+        initial_state_claimed=True,
+    )
