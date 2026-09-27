@@ -644,6 +644,10 @@ voice_id = "default"
 [asc_ai]
 enabled = true
 local_only = true
+# Optional additional internal DNS names allowed for ASC-AI service endpoints.
+# Loopback, RFC1918/link-local IPs, *.local and the built-in Docker service
+# names are already allowed. Public/cloud hostnames stay blocked in local_only.
+local_service_hosts = []
 prompt_intelligence_url = "http://127.0.0.1:8094"
 image_adapter_url = "http://127.0.0.1:8091"
 visual_analyzer_url = "http://127.0.0.1:8095"
