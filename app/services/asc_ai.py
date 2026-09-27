@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import os
@@ -7,6 +8,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from loguru import logger
@@ -35,6 +37,63 @@ def _setting(name: str, default: Any = None) -> Any:
     return config.asc_ai.get(name, default)
 
 
+_DEFAULT_LOCAL_SERVICE_HOSTS = {
+    "localhost",
+    "host.docker.internal",
+    "gpu-scheduler",
+    "prompt-llm-local",
+    "image-adapter",
+    "prompt-intelligence",
+    "visual-analyzer",
+    "character-chat",
+    "chatterbox-tts",
+}
+
+
+def _assert_local_endpoint(name: str, url: str) -> str:
+    value = str(url or "").strip().rstrip("/")
+    if not local_only():
+        return value
+
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower().strip()
+    if parsed.scheme not in {"http", "https"} or not host:
+        raise AscAIError(f"{name} has an invalid local endpoint URL")
+
+    configured = _setting("local_service_hosts", [])
+    if isinstance(configured, str):
+        configured_hosts = {
+            item.strip().lower()
+            for item in configured.split(",")
+            if item.strip()
+        }
+    else:
+        configured_hosts = {
+            str(item or "").strip().lower()
+            for item in (configured or [])
+            if str(item or "").strip()
+        }
+    allowed_hosts = _DEFAULT_LOCAL_SERVICE_HOSTS | configured_hosts
+
+    local_host = host in allowed_hosts or host.endswith(".local")
+    if not local_host:
+        try:
+            address = ipaddress.ip_address(host)
+            local_host = (
+                address.is_loopback
+                or address.is_private
+                or address.is_link_local
+            )
+        except ValueError:
+            local_host = False
+
+    if not local_host:
+        raise AscAIError(
+            f"local-only mode blocks external endpoint for {name}: {host}"
+        )
+    return value
+
+
 def enabled() -> bool:
     return bool(_setting("enabled", True))
 
@@ -44,45 +103,51 @@ def local_only() -> bool:
 
 
 def _prompt_url() -> str:
-    return (
+    return _assert_local_endpoint(
+        "prompt_intelligence",
         os.getenv("ASC_AI_PROMPT_URL")
-        or str(_setting("prompt_intelligence_url", "http://127.0.0.1:8094"))
-    ).rstrip("/")
+        or str(_setting("prompt_intelligence_url", "http://127.0.0.1:8094")),
+    )
 
 
 def _image_url() -> str:
-    return (
+    return _assert_local_endpoint(
+        "image_adapter",
         os.getenv("ASC_AI_IMAGE_ADAPTER_URL")
-        or str(_setting("image_adapter_url", "http://127.0.0.1:8091"))
-    ).rstrip("/")
+        or str(_setting("image_adapter_url", "http://127.0.0.1:8091")),
+    )
 
 
 def _visual_url() -> str:
-    return (
+    return _assert_local_endpoint(
+        "visual_analyzer",
         os.getenv("ASC_AI_VISUAL_ANALYZER_URL")
-        or str(_setting("visual_analyzer_url", "http://127.0.0.1:8095"))
-    ).rstrip("/")
+        or str(_setting("visual_analyzer_url", "http://127.0.0.1:8095")),
+    )
 
 
 def _character_url() -> str:
-    return (
+    return _assert_local_endpoint(
+        "character_hub",
         os.getenv("ASC_AI_CHARACTER_HUB_URL")
-        or str(_setting("character_hub_url", "http://127.0.0.1:8096"))
-    ).rstrip("/")
+        or str(_setting("character_hub_url", "http://127.0.0.1:8096")),
+    )
 
 
 def _scheduler_url() -> str:
-    return (
+    return _assert_local_endpoint(
+        "scheduler",
         os.getenv("ASC_AI_SCHEDULER_URL")
-        or str(_setting("scheduler_url", "http://127.0.0.1:8090"))
-    ).rstrip("/")
+        or str(_setting("scheduler_url", "http://127.0.0.1:8090")),
+    )
 
 
 def _prompt_llm_url() -> str:
-    return (
+    return _assert_local_endpoint(
+        "prompt_llm",
         os.getenv("ASC_AI_PROMPT_LLM_URL")
-        or str(_setting("prompt_llm_url", "http://127.0.0.1:8080"))
-    ).rstrip("/")
+        or str(_setting("prompt_llm_url", "http://127.0.0.1:8080")),
+    )
 
 
 def _chatterbox_root_url() -> str:
@@ -90,7 +155,8 @@ def _chatterbox_root_url() -> str:
         os.getenv("MPT_CHATTERBOX_BASE_URL")
         or str(config.chatterbox.get("base_url", "http://127.0.0.1:4123/v1"))
     ).rstrip("/")
-    return base_url[:-3] if base_url.endswith("/v1") else base_url
+    root = base_url[:-3] if base_url.endswith("/v1") else base_url
+    return _assert_local_endpoint("chatterbox_tts", root)
 
 
 def list_characters() -> list[str]:
