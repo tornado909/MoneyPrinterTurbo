@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import re
@@ -8,6 +9,7 @@ import time
 import uuid
 from contextlib import contextmanager, suppress
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import requests
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -17,6 +19,39 @@ from app.services import local_research
 
 class DirectorError(RuntimeError):
     pass
+
+
+_LOCAL_RUNTIME_HOSTS = {
+    "localhost",
+    "host.docker.internal",
+    "gpu-scheduler",
+    "prompt-llm-local",
+}
+
+
+def _assert_local_runtime_url(name: str, url: str) -> str:
+    value = str(url or "").strip().rstrip("/")
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower().strip()
+    if parsed.scheme not in {"http", "https"} or not host:
+        raise DirectorError(f"{name} has an invalid local endpoint URL")
+
+    allowed = host in _LOCAL_RUNTIME_HOSTS or host.endswith(".local")
+    if not allowed:
+        try:
+            address = ipaddress.ip_address(host)
+            allowed = (
+                address.is_loopback
+                or address.is_private
+                or address.is_link_local
+            )
+        except ValueError:
+            allowed = False
+    if not allowed:
+        raise DirectorError(
+            f"scheduler-managed local inference blocks external {name}: {host}"
+        )
+    return value
 
 
 class DirectorSceneCandidate(BaseModel):
@@ -79,8 +114,12 @@ class SchedulerManagedLocalLLM:
         priority: int = 150,
         admission_timeout: float = 300.0,
     ):
-        self.scheduler_url = scheduler_url.rstrip("/")
-        self.server_url = server_url.rstrip("/")
+        self.scheduler_url = _assert_local_runtime_url(
+            "scheduler_url", scheduler_url
+        )
+        self.server_url = _assert_local_runtime_url(
+            "prompt_llm_url", server_url
+        )
         self.model_id = model_id
         self.model_name = model_name
         self.estimated_vram_mb = estimated_vram_mb
