@@ -96,7 +96,33 @@ def _target_ratio(aspect: str) -> float | None:
     return float(match.group(1)) / denominator if denominator > 0 else None
 
 
-def _search_score(item: dict, target_ratio: float | None) -> tuple:
+_QUERY_TOKEN_RE = re.compile(r"[A-Za-z0-9]{3,}")
+
+
+def _query_tokens(value: str) -> set[str]:
+    return {
+        token.lower()
+        for token in _QUERY_TOKEN_RE.findall(str(value or ""))
+        if token.lower() not in {
+            "the", "and", "for", "with", "from", "into", "photo", "image",
+            "view", "close", "modern", "real", "realistic",
+        }
+    }
+
+
+def _semantic_overlap(query: str, item: dict) -> float:
+    query_tokens = _query_tokens(query)
+    if not query_tokens:
+        return 0.0
+    haystack = " ".join(
+        str(item.get(key) or "")
+        for key in ("title", "description", "credit")
+    )
+    item_tokens = _query_tokens(haystack)
+    return len(query_tokens & item_tokens) / max(1, len(query_tokens))
+
+
+def _search_score(item: dict, target_ratio: float | None, query: str) -> tuple:
     width = max(1, int(item.get("width") or 1))
     height = max(1, int(item.get("height") or 1))
     ratio_error = (
@@ -104,7 +130,12 @@ def _search_score(item: dict, target_ratio: float | None) -> tuple:
         if target_ratio
         else 0.0
     )
-    return (ratio_error, -(width * height))
+    semantic = _semantic_overlap(query, item)
+    search_rank = int(item.get("search_rank") or 9999)
+    # Semantic match is intentionally first. Wikimedia's own search rank is
+    # next. Aspect ratio is a production concern, but must not turn an
+    # irrelevant vertical photo into the top factual result.
+    return (-semantic, search_rank, ratio_error, -(width * height))
 
 
 def search_commons_images(
@@ -176,7 +207,7 @@ def search_commons_images(
 
     pages = ((payload.get("query") or {}).get("pages") or [])
     candidates: list[dict[str, Any]] = []
-    for page in pages:
+    for page_position, page in enumerate(pages):
         if not isinstance(page, dict):
             continue
         imageinfo = page.get("imageinfo") or []
@@ -213,6 +244,7 @@ def search_commons_images(
             {
                 "provider": "wikimedia_commons",
                 "title": title,
+                "search_rank": int(page.get("index") or page_position + 1),
                 "page_id": page.get("pageid"),
                 "page_url": page_url,
                 "media_url": media_url,
@@ -242,7 +274,7 @@ def search_commons_images(
         )
 
     ratio = _target_ratio(aspect)
-    candidates.sort(key=lambda row: _search_score(row, ratio))
+    candidates.sort(key=lambda row: _search_score(row, ratio, query))
     if cache_ttl_seconds:
         with _CACHE_LOCK:
             _SEARCH_CACHE[cache_key] = (
