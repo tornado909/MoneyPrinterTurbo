@@ -646,6 +646,46 @@ def load_director_plan(task_id: str) -> dict | None:
     return plan
 
 
+def sanitize_resumed_plan(plan: dict, params) -> dict:
+    """Apply the current task's privacy budget to a previously saved plan."""
+    result = json.loads(json.dumps(plan))
+    media_override = getattr(
+        params, "director_public_media_enabled", None
+    )
+    media_allowed = (
+        bool(media_override)
+        if media_override is not None
+        else bool(_setting("public_media_enabled", False))
+    )
+    research_override = getattr(
+        params, "director_public_research_enabled", None
+    )
+    research_allowed = (
+        bool(research_override)
+        if research_override is not None
+        else bool(_setting("public_research_enabled", False))
+    )
+
+    egress = result.get("public_egress")
+    if not isinstance(egress, dict):
+        egress = {}
+    egress["media_enabled"] = media_allowed
+    # Reusing already-saved research does not cause a new HTTP request, but the
+    # flag records whether new public research would be allowed for this task.
+    egress["research_enabled"] = research_allowed
+    result["public_egress"] = egress
+
+    if not media_allowed:
+        for scene in result.get("scenes") or []:
+            if not isinstance(scene, dict):
+                continue
+            if scene.get("visual_strategy") == "PUBLIC_IMAGE":
+                scene["visual_strategy"] = "LOCAL_IMAGE"
+                scene["public_media_query"] = ""
+                scene["resume_privacy_downgrade"] = "PUBLIC_IMAGE_TO_LOCAL_IMAGE"
+    return result
+
+
 def load_production_manifest(task_id: str) -> dict | None:
     task_root = Path(utils.task_dir(task_id)).resolve()
     target = (task_root / "production-manifest.json").resolve()
