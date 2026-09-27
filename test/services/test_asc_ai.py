@@ -1104,6 +1104,44 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertFalse(result["timing"]["fully_matched"])
         self.assertEqual(result["timing"]["feasible_max_seconds"], 15)
 
+    def test_resumed_plan_cannot_restore_public_media_without_current_opt_in(self):
+        plan = {
+            "local_only": True,
+            "script": "Текст.",
+            "public_egress": {
+                "research_enabled": True,
+                "media_enabled": True,
+            },
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "visual_strategy": "PUBLIC_IMAGE",
+                    "public_media_query": "greenhouse",
+                    "visual_prompt": "greenhouse",
+                }
+            ],
+        }
+        sanitized = asc_ai.sanitize_resumed_plan(
+            plan,
+            self.params(
+                director_public_research_enabled=False,
+                director_public_media_enabled=False,
+            ),
+        )
+
+        self.assertFalse(sanitized["public_egress"]["media_enabled"])
+        self.assertFalse(sanitized["public_egress"]["research_enabled"])
+        self.assertEqual(
+            sanitized["scenes"][0]["visual_strategy"],
+            "LOCAL_IMAGE",
+        )
+        self.assertEqual(sanitized["scenes"][0]["public_media_query"], "")
+        self.assertEqual(
+            sanitized["scenes"][0]["resume_privacy_downgrade"],
+            "PUBLIC_IMAGE_TO_LOCAL_IMAGE",
+        )
+        self.assertEqual(plan["scenes"][0]["visual_strategy"], "PUBLIC_IMAGE")
+
     def test_scene_resume_reuses_matching_completed_clip_without_gpu_work(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
