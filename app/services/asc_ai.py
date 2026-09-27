@@ -1030,7 +1030,15 @@ def retime_director_plan(plan: dict, audio_duration: float) -> dict:
 
     if image_indices:
         image_target = bounded_target - fixed_seconds
-        weights = [max(1, requested[index]) for index in image_indices]
+        # Once Director narrations are a verbatim partition of the script,
+        # text length is a better deterministic timing proxy than the model's
+        # first-pass duration guess. Whitespace is ignored so Russian/English
+        # formatting differences do not distort the ratio.
+        weights = []
+        for index in image_indices:
+            narration = str(source_scenes[index].get("narration") or "")
+            narration_units = len(re.sub(r"\s+", "", narration))
+            weights.append(max(1, narration_units or requested[index]))
         weight_sum = float(sum(weights))
         ideals = [image_target * weight / weight_sum for weight in weights]
         durations = [max(2, min(15, int(math.floor(value)))) for value in ideals]
@@ -1083,6 +1091,7 @@ def retime_director_plan(plan: dict, audio_duration: float) -> dict:
         "feasible_min_seconds": feasible_min,
         "feasible_max_seconds": feasible_max,
         "fully_matched": effective_total == target_seconds,
+        "weight_source": "scene_narration_characters",
         "retimed": any(
             int(scene.get("duration_seconds") or 0)
             != int(scene.get("planned_duration_seconds") or 0)
