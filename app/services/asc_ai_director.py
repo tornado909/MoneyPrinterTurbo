@@ -293,7 +293,7 @@ class SchedulerManagedLocalLLM:
                 daemon=True,
             )
             heartbeat_thread.start()
-            yield
+            yield lease_id
         except BaseException as exc:
             failure = exc
             raise
@@ -361,10 +361,11 @@ class SchedulerManagedLocalLLM:
             "top_p": 0.9,
             "max_tokens": max_tokens,
         }
-        with self.lease():
+        with self.lease() as lease_id:
             result = _json_request(
                 "POST",
                 self.server_url + "/v1/chat/completions",
+                headers={"X-ASC-Lease": lease_id},
                 json=payload,
                 timeout=(5, timeout),
             )
