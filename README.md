@@ -119,6 +119,8 @@ POST /api/v1/asc-ai/production
 
 `POST /production` выполняет полный local-only preflight, преобразует простой ASC-AI request в штатный `TaskVideoRequest` и ставит render в **тот же TaskManager/Redis queue**, что обычный `/videos`. Ответ возвращает обычный `task_id`; статус читается через `GET /api/v1/tasks/{task_id}`.
 
+Для agent retries поддерживается persistent header `Idempotency-Key` (8–128 символов). Один и тот же ключ + тот же payload возвращает тот же детерминированный `task_id` без нового render; повтор ключа с другим payload возвращает `409`. Claim хранится в task state и переживает рестарт API.
+
 ## Local-only policy
 
 При `[asc_ai] local_only = true`:
