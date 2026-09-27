@@ -8,7 +8,7 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from moviepy import (
     ImageClip,
@@ -63,6 +63,32 @@ class TestVideoService(unittest.TestCase):
         config.app.update(self.original_app_config)
         vd._runtime_disabled_video_codecs.clear()
         vd._ffmpeg_encoder_exists.cache_clear()
+
+    def test_director_transition_dispatch_is_typed_and_deterministic(self):
+        clip = MagicMock()
+        clip.duration = 4.0
+        sentinel = MagicMock()
+
+        with patch.object(
+            vd.video_effects, "fadein_transition", return_value=sentinel
+        ) as fade:
+            result = vd._apply_director_transition(clip, "fade_in")
+
+        self.assertIs(result, sentinel)
+        fade.assert_called_once_with(clip, 0.5)
+        self.assertIs(vd._apply_director_transition(clip, "cut"), clip)
+        with self.assertRaisesRegex(ValueError, "unsupported Director transition"):
+            vd._apply_director_transition(clip, "crossfade")
+
+    def test_director_scene_postprocess_is_zero_cost_for_cut_without_callout(self):
+        with patch.object(vd, "_open_video_clip_quietly") as open_clip:
+            result = vd.render_director_scene_effects(
+                "/tmp/scene.mp4",
+                transition="cut",
+                overlay_text="",
+            )
+        self.assertEqual(result, "/tmp/scene.mp4")
+        open_clip.assert_not_called()
 
     def test_generate_video_rejects_font_outside_directory_before_opening_media(self):
         """WebUI、CLI 或内部调用绕过 API 时，渲染层也必须阻断越界字体。"""
