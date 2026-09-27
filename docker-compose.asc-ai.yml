@@ -1,6 +1,8 @@
 # ASC-AI integration override.
-# Run:
+# Development source build:
 #   docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml up -d --build
+# Production image:
+#   docker compose -f docker-compose.release.yml -f docker-compose.asc-ai.yml up -d
 #
 # MoneyPrinterTurbo itself stays CPU-only. All neural GPU work is delegated to
 # ASC-AI services that acquire GPU Scheduler leases.
@@ -17,8 +19,11 @@ x-asc-ai-env: &asc-ai-env
   MPT_APP_ENABLE_REDIS: "true"
   MPT_APP_REDIS_HOST: redis
 
+# Do not bind-mount the repository here. The base development compose already
+# mounts ./ over /MoneyPrinterTurbo, while docker-compose.release.yml must keep
+# the code baked into ghcr.io/tornado909/moneyprinterturbo. This overlay only
+# adds the shared ASC-AI artifact volume, so it is safe with either base file.
 x-asc-ai-volumes: &asc-ai-volumes
-  - ./:/MoneyPrinterTurbo
   - /srv/ai-data:/srv/ai-data
 
 x-mpt-extra-hosts: &mpt-extra-hosts
