@@ -17,13 +17,15 @@ MoneyPrinterTurbo используется как production/editor слой, а
 
 ## Local-only policy
 
-При `asc_ai.local_only = true` production-путь работает fail-closed:
+При `asc_ai.local_only = true` production-путь работает fail-closed. По умолчанию это также **zero-public-egress**:
 
 - запрещены облачные/платные LLM;
 - запрещены облачные TTS;
 - запрещены облачные генераторы изображений и видео;
 - запрещены удалённые AI-music providers;
 - запрещён автоматический Upload-Post;
+- внутренние ASC-AI URL разрешены только для loopback/RFC1918/link-local, встроенных Docker service names, `*.local` или явного `local_service_hosts`;
+- Wikipedia research и Wikimedia visual search выключены, пока пользователь не разрешит их для конкретной задачи;
 - если Director выключен, для запуска без облачного LLM необходимо передать готовый сценарий.
 
 Разрешены GPU Scheduler, локальный Qwen3-8B Director, Prompt Intelligence, Image Adapter, Krea/Lustify, Wan, Visual Analyzer/Qwen3-VL, self-hosted Chatterbox, local faster-whisper и локальные пользовательские материалы.
@@ -119,8 +121,8 @@ Task ID детерминирован от ключа, а canonical request finge
 - image → лёгкий zoom/pan в MoneyPrinterTurbo;
 - только выбранные Director сцены: Wan I2V;
 - Qwen3-VL используется adaptive: первый/каждый N-й still, Character Hub сцены, retries и все Wan-видео;
-- MediaWiki research — bounded public HTTP без AI API; результаты кэшируются на retry и при нехватке данных могут добираться из fallback-языка, source URLs остаются в provenance;
-- bounded Wikimedia Commons `PUBLIC_IMAGE` сцены реально обходят локальную diffusion-генерацию; допускаются только editable/commercial-safe Public Domain, CC0, CC BY и CC BY-SA лицензии, а NC/ND блокируются; при поисковой/QC ошибке сцена локально генерируется как fallback;
+- MediaWiki research — только при task-level opt-in; bounded public HTTP без AI API, результаты кэшируются на retry и при нехватке данных могут добираться из fallback-языка, source URLs остаются в provenance;
+- bounded Wikimedia Commons `PUBLIC_IMAGE` — отдельный task-level opt-in; сцены реально обходят локальную diffusion-генерацию, допускаются только editable/commercial-safe Public Domain, CC0, CC BY и CC BY-SA лицензии, NC/ND блокируются; при поисковой/QC ошибке сцена локально генерируется как fallback;
 - локальные LLM/VLM освобождают VRAM после inference согласно ASC-AI scheduler policy.
 
 Такой режим значительно дешевле по вычислениям, чем генерация всего ролика через I2V, но оставляет Director возможность выделять действительно важные динамические сцены.
