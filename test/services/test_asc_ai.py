@@ -116,6 +116,40 @@ class TestAscAIIntegration(unittest.TestCase):
                 "http://prompt-llm-local:8080",
             )
 
+    @patch("app.services.asc_ai_director._json_request")
+    def test_scheduler_managed_llm_forwards_active_lease_header(self, request_json):
+        request_json.side_effect = [
+            {"job": {"job_id": "job-1"}, "initial_stage_id": "stage-1"},
+            {"state": "READY"},
+            {"state": "READY_FOR_GPU"},
+            {"decision": "GRANTED", "lease": {"lease_id": "lease-1"}},
+            {"vram_used_mb": 1000},
+            {"lease_id": "lease-1"},
+            {"choices": [{"message": {"content": "ok"}}]},
+            {"vram_used_mb": 1000},
+            {"lease_id": "lease-1"},
+            {"state": "COMPLETED"},
+        ]
+        runtime = asc_ai_director.SchedulerManagedLocalLLM(
+            "http://gpu-scheduler:8090",
+            "http://prompt-llm-local:8080",
+        )
+        result = runtime.chat(
+            "hello",
+            timeout=30,
+            temperature=0.1,
+            max_tokens=64,
+        )
+        self.assertEqual(result, "ok")
+        inference_call = next(
+            call for call in request_json.call_args_list
+            if call.args[1].endswith("/v1/chat/completions")
+        )
+        self.assertEqual(
+            inference_call.kwargs["headers"]["X-ASC-Lease"],
+            "lease-1",
+        )
+
     def test_local_only_accepts_asc_ai_chatterbox_and_whisper(self):
         asc_ai.validate_local_only(self.params())
 
