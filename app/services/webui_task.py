@@ -165,6 +165,8 @@ def submit_generation(
         state=const.TASK_STATE_PROCESSING,
         progress=0,
         video_subject=task_params.video_subject or task_params.video_script or task_id,
+        queue_executor="webui",
+        retryable=False,
     )
     try:
         _task_manager.add_task(
