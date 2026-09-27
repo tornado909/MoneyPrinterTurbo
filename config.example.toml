@@ -655,6 +655,8 @@ director_priority = 150
 director_temperature = 0.45
 director_max_tokens = 3500
 director_style = "cinematic documentary realism, clean composition"
+# Font used only for short Director overlay_text callouts baked into scene clips.
+director_overlay_font = "MicrosoftYaHeiBold.ttc"
 # Optional free public factual grounding. Only the video topic is sent to
 # MediaWiki; extracts and source URLs are stored in director-plan.json.
 public_research_enabled = true
