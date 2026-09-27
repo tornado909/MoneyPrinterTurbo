@@ -5280,7 +5280,7 @@ def _render_video_settings(panel, params):
                 st.caption(tr("ASC-AI Director Help"))
 
                 with st.expander(tr("Director Settings"), expanded=True):
-                    duration_col, video_scene_col = st.columns(2)
+                    duration_col, video_scene_col, public_scene_col = st.columns(3)
                     with duration_col:
                         params.director_target_duration_seconds = int(
                             st.slider(
@@ -5313,6 +5313,27 @@ def _render_video_settings(panel, params):
                                 step=1,
                                 key="director_max_local_video_scenes",
                                 help=tr("Director Local Video Scenes Help"),
+                            )
+                        )
+
+                    with public_scene_col:
+                        params.director_max_public_image_scenes = int(
+                            st.slider(
+                                tr("Director Public Image Scenes"),
+                                min_value=0,
+                                max_value=6,
+                                value=int(
+                                    config.ui.get(
+                                        "director_max_public_image_scenes",
+                                        config.asc_ai.get(
+                                            "director_max_public_image_scenes",
+                                            params.director_max_public_image_scenes,
+                                        ),
+                                    )
+                                ),
+                                step=1,
+                                key="director_max_public_image_scenes",
+                                help=tr("Director Public Image Scenes Help"),
                             )
                         )
 
@@ -5431,6 +5452,11 @@ def _render_video_settings(panel, params):
                         "ui",
                         "director_max_local_video_scenes",
                         params.director_max_local_video_scenes,
+                    )
+                    _set_runtime_config(
+                        "ui",
+                        "director_max_public_image_scenes",
+                        params.director_max_public_image_scenes,
                     )
                     _set_runtime_config("ui", "director_style", params.director_style)
                     _set_runtime_config(
