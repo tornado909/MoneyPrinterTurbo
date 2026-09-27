@@ -1973,5 +1973,95 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertEqual(row["defaults"]["length"], 89)
 
 
+    @patch.object(asc_ai, "persist_final_quality_report")
+    @patch.object(asc_ai, "quality_control")
+    @patch.object(asc_ai, "_inspect_final_video")
+    def test_final_quality_control_combines_structural_and_visual_checks(
+        self, inspect_video, quality_control, persist_report
+    ):
+        config.asc_ai.update(
+            {
+                "final_qc_enabled": True,
+                "final_qc_required": True,
+                "final_qc_visual_analysis": True,
+            }
+        )
+        inspect_video.return_value = {
+            "passed": True,
+            "issues": [],
+            "duration_seconds": 12.0,
+            "width": 1080,
+            "height": 1920,
+            "has_audio": True,
+            "size_bytes": 1024,
+        }
+        quality_control.return_value = {
+            "passed": True,
+            "technical_status": "valid",
+            "issues": [],
+            "provider": "local",
+        }
+
+        report = asc_ai.final_quality_control(
+            "final-qc-task",
+            ["final-1.mp4", "final-2.mp4"],
+            expected_duration=12.0,
+        )
+
+        self.assertTrue(report["passed"])
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(len(report["outputs"]), 2)
+        self.assertEqual(inspect_video.call_count, 2)
+        self.assertEqual(quality_control.call_count, 2)
+        for call in quality_control.call_args_list:
+            self.assertEqual(call.kwargs["media_kind"], "final_video")
+            self.assertTrue(call.kwargs["run_visual_analysis"])
+        persist_report.assert_called_once()
+        self.assertEqual(
+            persist_report.call_args.args[1]["schema_version"],
+            "mpt.final-qc.v1",
+        )
+
+    @patch.object(asc_ai, "persist_final_quality_report")
+    @patch.object(asc_ai, "quality_control")
+    @patch.object(asc_ai, "_inspect_final_video")
+    def test_final_quality_control_fails_closed_on_structural_error(
+        self, inspect_video, quality_control, persist_report
+    ):
+        config.asc_ai.update(
+            {
+                "final_qc_enabled": True,
+                "final_qc_required": True,
+                "final_qc_visual_analysis": True,
+            }
+        )
+        inspect_video.return_value = {
+            "passed": False,
+            "issues": ["final video has no audio stream"],
+            "duration_seconds": 12.0,
+            "width": 1080,
+            "height": 1920,
+            "has_audio": False,
+            "size_bytes": 1024,
+        }
+
+        with self.assertRaisesRegex(
+            asc_ai.AscAIError,
+            "final production QC failed: final video has no audio stream",
+        ):
+            asc_ai.final_quality_control(
+                "final-qc-bad",
+                ["final.mp4"],
+                expected_duration=12.0,
+            )
+
+        quality_control.assert_not_called()
+        persist_report.assert_called_once()
+        persisted = persist_report.call_args.args[1]
+        self.assertFalse(persisted["passed"])
+        self.assertEqual(persisted["status"], "failed")
+
+
+
 if __name__ == "__main__":
     unittest.main()
