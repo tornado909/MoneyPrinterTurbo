@@ -922,6 +922,193 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertFalse(result["timing"]["fully_matched"])
         self.assertEqual(result["timing"]["feasible_max_seconds"], 15)
 
+    def test_public_image_scene_skips_local_diffusion_and_writes_credits(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            public_image = Path(temp_dir) / "public.png"
+            public_image.write_bytes(b"public-image")
+            final_clip = str(Path(temp_dir) / "public.mp4")
+            public_result = {
+                "provider": "wikimedia_commons",
+                "title": "Greenhouse",
+                "page_url": "https://commons.wikimedia.org/wiki/File:Greenhouse.jpg",
+                "original_url": "https://upload.wikimedia.org/example.jpg",
+                "license": "CC BY-SA 4.0",
+                "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+                "artist": "Example",
+                "path": str(public_image),
+                "cache_path": str(public_image),
+                "query": "modern greenhouse",
+            }
+            with (
+                patch.object(asc_ai.utils, "task_dir", return_value=temp_dir),
+                patch.object(
+                    asc_ai,
+                    "_image_binding",
+                    return_value={
+                        "workflow_id": "image-v1",
+                        "model_id": "image-model",
+                        "default_resolution": "768x1344",
+                    },
+                ),
+                patch.object(
+                    asc_ai,
+                    "_workflow_resolution",
+                    return_value=(768, 1344),
+                ),
+                patch.object(
+                    asc_ai,
+                    "acquire_public_scene_image",
+                    return_value=public_result,
+                ) as acquire,
+                patch.object(
+                    asc_ai,
+                    "quality_control",
+                    return_value={
+                        "passed": True,
+                        "technical_status": "valid",
+                        "technical_score": 1.0,
+                        "semantic_score": None,
+                        "issues": [],
+                        "retry_prompt": "",
+                    },
+                ),
+                patch.object(asc_ai, "generate_image") as generate_image,
+                patch.object(
+                    asc_ai.video,
+                    "render_image_zoom_video",
+                    return_value=final_clip,
+                ),
+            ):
+                result = asc_ai.generate_scene_materials(
+                    task_id="task-public",
+                    plan={
+                        "schema_version": "mpt.director.v3",
+                        "director_provider": "asc-ai-local-qwen3",
+                        "gpu_policy": "scheduler_managed",
+                        "scenes": [
+                            {
+                                "scene_id": "scene_01",
+                                "visual_strategy": "PUBLIC_IMAGE",
+                                "public_media_query": "modern greenhouse",
+                                "visual_prompt": "modern glass greenhouse",
+                                "duration_seconds": 5,
+                            }
+                        ],
+                    },
+                    audio_duration=4.0,
+                    aspect="9:16",
+                    clip_duration=5,
+                )
+
+            self.assertEqual(result, [final_clip])
+            acquire.assert_called_once()
+            generate_image.assert_not_called()
+            manifest = json.loads(
+                (Path(temp_dir) / "production-manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                manifest["scenes"][0]["image_source"],
+                "wikimedia_commons",
+            )
+            self.assertEqual(manifest["public_media_credits"]["count"], 1)
+            self.assertTrue(
+                (Path(temp_dir) / "public-media-credits.json").is_file()
+            )
+
+    def test_public_image_failure_falls_back_to_local_generation_without_credits(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_image = Path(temp_dir) / "generated.png"
+            local_image.write_bytes(b"local-image")
+            final_clip = str(Path(temp_dir) / "generated.mp4")
+            with (
+                patch.object(asc_ai.utils, "task_dir", return_value=temp_dir),
+                patch.object(
+                    asc_ai,
+                    "_image_binding",
+                    return_value={
+                        "workflow_id": "image-v1",
+                        "model_id": "image-model",
+                        "default_resolution": "768x1344",
+                    },
+                ),
+                patch.object(
+                    asc_ai,
+                    "_workflow_resolution",
+                    return_value=(768, 1344),
+                ),
+                patch.object(
+                    asc_ai,
+                    "acquire_public_scene_image",
+                    side_effect=asc_ai.AscAIError("commons offline"),
+                ),
+                patch.object(
+                    asc_ai,
+                    "generate_image",
+                    return_value=(str(local_image), {"job_id": "job-1"}),
+                ) as generate_image,
+                patch.object(
+                    asc_ai,
+                    "quality_control",
+                    return_value={
+                        "passed": True,
+                        "technical_status": "valid",
+                        "technical_score": 1.0,
+                        "semantic_score": None,
+                        "issues": [],
+                        "retry_prompt": "",
+                    },
+                ),
+                patch.object(
+                    asc_ai.public_media,
+                    "write_credits",
+                ) as write_credits,
+                patch.object(
+                    asc_ai.video,
+                    "render_image_zoom_video",
+                    return_value=final_clip,
+                ),
+            ):
+                result = asc_ai.generate_scene_materials(
+                    task_id="task-public-fallback",
+                    plan={
+                        "schema_version": "mpt.director.v3",
+                        "director_provider": "asc-ai-local-qwen3",
+                        "gpu_policy": "scheduler_managed",
+                        "scenes": [
+                            {
+                                "scene_id": "scene_01",
+                                "visual_strategy": "PUBLIC_IMAGE",
+                                "public_media_query": "modern greenhouse",
+                                "visual_prompt": "modern glass greenhouse",
+                                "duration_seconds": 5,
+                            }
+                        ],
+                    },
+                    audio_duration=4.0,
+                    aspect="9:16",
+                    clip_duration=5,
+                )
+
+            self.assertEqual(result, [final_clip])
+            generate_image.assert_called_once()
+            write_credits.assert_not_called()
+            manifest = json.loads(
+                (Path(temp_dir) / "production-manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                manifest["scenes"][0]["fallback"],
+                "public_media_unavailable",
+            )
+            self.assertEqual(
+                manifest["scenes"][0]["image_source"],
+                "local_generation",
+            )
+            self.assertNotIn("public_media_credits", manifest)
+
     @patch("app.services.asc_ai_qc.quality_control")
     def test_quality_control_uses_canonical_qc_module(self, qc):
         qc.return_value = {
