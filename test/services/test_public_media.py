@@ -9,14 +9,23 @@ class TestPublicMediaLicensePolicy(unittest.TestCase):
             "CC0",
             "CC BY 4.0",
             "CC-BY-3.0",
-            "CC BY-SA 4.0",
-            "CC-BY-SA-2.5",
             "Public domain",
             "PDM",
         )
         for value in allowed:
             with self.subTest(value=value):
                 self.assertTrue(public_media._license_is_reusable(value))
+
+    def test_share_alike_requires_explicit_opt_in(self):
+        for value in ("CC BY-SA 4.0", "CC-BY-SA-2.5"):
+            with self.subTest(value=value):
+                self.assertFalse(public_media._license_is_reusable(value))
+                self.assertTrue(
+                    public_media._license_is_reusable(
+                        value,
+                        allow_share_alike=True,
+                    )
+                )
 
     def test_rejects_noncommercial_and_no_derivatives_variants(self):
         blocked = (
