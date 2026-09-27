@@ -355,6 +355,164 @@ class TestTaskService(unittest.TestCase):
         self.assertIsNone(final_params.video_transition_mode)
         self.assertEqual(final_params.video_clip_duration, 8)
 
+    def test_retry_resume_reuses_director_audio_and_subtitle_without_recomputing(self):
+        params = VideoParams(
+            video_subject="Resume",
+            video_source="asc_ai",
+            voice_name="chatterbox:ru-default",
+            subtitle_enabled=True,
+        )
+        state = MemoryState()
+        state.update_task(
+            "retry-task",
+            retry_of="old-task",
+            state=tm.const.TASK_STATE_PROCESSING,
+        )
+        saved_plan = {
+            "schema_version": "mpt.director.v3",
+            "local_only": True,
+            "gpu_policy": "scheduler_managed",
+            "script": "Готовый текст.",
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "narration": "Готовый текст.",
+                    "duration_seconds": 5,
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "visual_prompt": "greenhouse",
+                    "motion_prompt": "",
+                    "transition": "cut",
+                    "overlay_text": "",
+                }
+            ],
+        }
+
+        with (
+            patch.object(tm.asc_ai, "load_director_plan", return_value=saved_plan),
+            patch.object(tm.asc_ai, "preflight") as preflight,
+            patch.object(tm.asc_ai, "create_director_plan") as create_plan,
+            patch.object(tm.asc_ai, "persist_director_plan"),
+            patch.object(
+                tm,
+                "_reuse_retry_audio",
+                return_value=("audio.wav", 5, None),
+            ) as reuse_audio,
+            patch.object(tm, "generate_audio") as generate_audio,
+            patch.object(
+                tm,
+                "_reuse_retry_subtitle",
+                return_value="subtitle.srt",
+            ) as reuse_subtitle,
+            patch.object(tm, "generate_subtitle") as generate_subtitle,
+            patch.object(
+                tm.asc_ai,
+                "retime_director_plan",
+                return_value=saved_plan,
+            ),
+            patch.object(tm.asc_ai, "persist_execution_plan"),
+            patch.object(
+                tm,
+                "get_video_materials",
+                return_value=["scene.mp4"],
+            ),
+            patch.object(
+                tm,
+                "generate_final_videos",
+                return_value=(["final.mp4"], ["combined.mp4"], []),
+            ),
+            patch.object(tm, "save_script_data"),
+            patch.object(tm.utils, "check_ffmpeg_ready", return_value=True),
+            patch.object(tm.sm, "state", state),
+        ):
+            result = tm.start("retry-task", params)
+
+        self.assertEqual(result["videos"], ["final.mp4"])
+        preflight.assert_called_once()
+        self.assertTrue(
+            preflight.call_args.kwargs["director_plan_ready"]
+        )
+        create_plan.assert_not_called()
+        reuse_audio.assert_called_once_with("old-task", "retry-task")
+        generate_audio.assert_not_called()
+        reuse_subtitle.assert_called_once()
+        generate_subtitle.assert_not_called()
+
+    def test_retry_with_missing_saved_plan_runs_normal_director_planning(self):
+        params = VideoParams(
+            video_subject="Resume",
+            video_source="asc_ai",
+            subtitle_enabled=False,
+        )
+        state = MemoryState()
+        state.update_task(
+            "retry-no-plan",
+            retry_of="old-task",
+            state=tm.const.TASK_STATE_PROCESSING,
+        )
+        new_plan = {
+            "schema_version": "mpt.director.v3",
+            "local_only": True,
+            "gpu_policy": "scheduler_managed",
+            "script": "Новый текст.",
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "narration": "Новый текст.",
+                    "duration_seconds": 5,
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "visual_prompt": "greenhouse",
+                }
+            ],
+        }
+
+        with (
+            patch.object(tm.asc_ai, "load_director_plan", return_value=None),
+            patch.object(tm.asc_ai, "preflight") as preflight,
+            patch.object(
+                tm.asc_ai,
+                "create_director_plan",
+                return_value=new_plan,
+            ) as create_plan,
+            patch.object(tm.asc_ai, "persist_director_plan"),
+            patch.object(
+                tm,
+                "_reuse_retry_audio",
+                return_value=None,
+            ),
+            patch.object(
+                tm,
+                "generate_audio",
+                return_value=("audio.wav", 5, None),
+            ),
+            patch.object(tm, "generate_subtitle", return_value=""),
+            patch.object(
+                tm.asc_ai,
+                "retime_director_plan",
+                return_value=new_plan,
+            ),
+            patch.object(tm.asc_ai, "persist_execution_plan"),
+            patch.object(
+                tm,
+                "get_video_materials",
+                return_value=["scene.mp4"],
+            ),
+            patch.object(
+                tm,
+                "generate_final_videos",
+                return_value=(["final.mp4"], ["combined.mp4"], []),
+            ),
+            patch.object(tm, "save_script_data"),
+            patch.object(tm.utils, "check_ffmpeg_ready", return_value=True),
+            patch.object(tm.sm, "state", state),
+        ):
+            result = tm.start("retry-no-plan", params)
+
+        self.assertEqual(result["videos"], ["final.mp4"])
+        self.assertFalse(
+            preflight.call_args.kwargs["director_plan_ready"]
+        )
+        create_plan.assert_called_once()
+
     def test_run_pipeline_fails_fast_when_ffmpeg_is_not_ready(self):
         """完整视频流水线必须在 LLM/TTS/素材服务之前先确认 FFmpeg 可用。"""
         params = VideoParams(video_subject="test")
