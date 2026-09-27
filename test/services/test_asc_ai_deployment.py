@@ -89,6 +89,9 @@ class TestAscAIDeployment(unittest.TestCase):
         self.assertTrue(asc["public_media_enabled"])
         self.assertEqual(asc["director_max_public_image_scenes"], 2)
         self.assertFalse(asc["public_media_allow_share_alike"])
+        self.assertTrue(asc["final_qc_enabled"])
+        self.assertTrue(asc["final_qc_required"])
+        self.assertTrue(asc["final_qc_visual_analysis"])
 
     def test_bootstrap_uploads_voice_with_russian_language_metadata(self):
         source = (
