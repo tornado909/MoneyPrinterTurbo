@@ -55,7 +55,7 @@ docker compose \
   -f docker-compose.release.yml \
   -f docker-compose.asc-ai.yml \
   -f docker-compose.chatterbox.yml \
-  up -d --build
+  up -d
 
 # Development из текущего checkout:
 # docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml \
