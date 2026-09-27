@@ -61,7 +61,7 @@ Commons используется только для подходящих reusab
     cd MoneyPrinterTurbo
     cp config.example.toml config.toml
     # Production: pull fork image first; build this checkout if GHCR has no image yet.
-    docker compose -f docker-compose.release.yml -f docker-compose.asc-ai.yml -f docker-compose.chatterbox.yml up -d
+    MPT_BIND_HOST=0.0.0.0 docker compose -f docker-compose.release.yml -f docker-compose.asc-ai.yml -f docker-compose.chatterbox.yml up -d
     bash scripts/bootstrap-chatterbox-ru-voice.sh /path/to/russian-reference.wav
 
 Для разработки из текущего checkout замените `docker-compose.release.yml` на `docker-compose.yml`. ASC-AI override намеренно **не** монтирует `./:/MoneyPrinterTurbo`: source bind принадлежит только dev-base, поэтому release-base не может быть незаметно перекрыт локальным кодом.
@@ -72,9 +72,11 @@ ASC-AI overlay также поднимает отдельный `redis:7-alpine`
 
 При рестарте API persisted **queued** задачи автоматически снова занимают свободные worker slots. Задача, которая уже была извлечена из очереди и выполнялась в момент падения процесса, не запускается повторно автоматически: её состояние переводится в `failed` с `failed_stage=startup_recovery`, `retryable=true` и `recovery_action=resubmit`. Это сознательная защита от двойной TTS/рендер/публикации. WebUI имеет отдельный in-process executor и recovery API-очереди его задачи не трогает.
 
-WebUI: `http://127.0.0.1:8501`
+WebUI: `http://<ASC-AI-IP>:8501`
 
-API: `http://127.0.0.1:8080/docs`
+API: `http://<ASC-AI-IP>:8080/docs`
+
+Без `MPT_BIND_HOST=0.0.0.0` host ports остаются loopback-only (`127.0.0.1`). Chatterbox `:4123` намеренно остаётся loopback/private и не требует LAN-публикации.
 
 ## Preflight
 
