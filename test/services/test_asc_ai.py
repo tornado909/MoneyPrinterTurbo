@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,6 +55,66 @@ class TestAscAIIntegration(unittest.TestCase):
         }
         values.update(changes)
         return SimpleNamespace(**values)
+
+    def test_local_endpoint_policy_accepts_private_runtime_and_blocks_cloud(self):
+        self.assertEqual(
+            asc_ai._assert_local_endpoint(
+                "image_adapter", "http://image-adapter:8091"
+            ),
+            "http://image-adapter:8091",
+        )
+        self.assertEqual(
+            asc_ai._assert_local_endpoint(
+                "scheduler", "http://10.55.2.8:8090/"
+            ),
+            "http://10.55.2.8:8090",
+        )
+        self.assertEqual(
+            asc_ai._assert_local_endpoint(
+                "custom", "https://service.agrom.local:9443"
+            ),
+            "https://service.agrom.local:9443",
+        )
+        with self.assertRaisesRegex(asc_ai.AscAIError, "blocks external"):
+            asc_ai._assert_local_endpoint(
+                "prompt_llm", "https://api.openai.com/v1"
+            )
+
+    def test_local_endpoint_policy_supports_explicit_internal_host_allowlist(self):
+        config.asc_ai["local_service_hosts"] = ["asc-ai.internal.example"]
+        self.assertEqual(
+            asc_ai._assert_local_endpoint(
+                "custom", "http://asc-ai.internal.example:9000"
+            ),
+            "http://asc-ai.internal.example:9000",
+        )
+
+    def test_env_cannot_redirect_image_adapter_to_external_gateway(self):
+        with patch.dict(
+            os.environ,
+            {"ASC_AI_IMAGE_ADAPTER_URL": "https://external.example/v1"},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(asc_ai.AscAIError, "blocks external"):
+                asc_ai._image_url()
+
+    def test_scheduler_managed_llm_rejects_external_runtime_urls(self):
+        with self.assertRaisesRegex(
+            asc_ai_director.DirectorError,
+            "blocks external",
+        ):
+            asc_ai_director.SchedulerManagedLocalLLM(
+                "http://gpu-scheduler:8090",
+                "https://api.openai.com/v1",
+            )
+        with self.assertRaisesRegex(
+            asc_ai_director.DirectorError,
+            "blocks external",
+        ):
+            asc_ai_director.SchedulerManagedLocalLLM(
+                "https://scheduler.example.com",
+                "http://prompt-llm-local:8080",
+            )
 
     def test_local_only_accepts_asc_ai_chatterbox_and_whisper(self):
         asc_ai.validate_local_only(self.params())
