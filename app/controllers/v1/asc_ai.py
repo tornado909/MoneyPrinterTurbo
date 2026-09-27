@@ -202,7 +202,7 @@ def capabilities(request: Request):
             "egress_policy": {
                 "internal_ai_endpoints": "private-or-explicit-local-hosts-only",
                 "external_ai_endpoints": "blocked",
-                "public_http_default": "disabled-opt-in",
+                "public_http_default": "enabled-cost-aware",
                 "public_http_sources": [
                     "https://*.wikipedia.org/w/api.php",
                     "https://commons.wikimedia.org/w/api.php",
