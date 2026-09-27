@@ -17,9 +17,9 @@
 - **GPU Scheduler обязателен:** Director получает lease перед локальным LLM inference; Krea/Lustify, Wan и Qwen3-VL используют существующий ASC-AI control plane.
 - **Строгий local-only:** облачные LLM/TTS/image/video/music providers и автоматическая сторонняя публикация блокируются в production-пути.
 - **Локальный QC:** Prompt Intelligence регистрирует каждый артефакт; adaptive policy не грузит Qwen3-VL для каждого still, но всегда анализирует Wan-видео, Character Hub сцены, retries и контрольные кадры.
-- **Экономия GPU:** большая часть сцен может быть статичной генерацией + лёгким zoom/pan; число Wan I2V сцен задаётся Director budget, а несовместимый aspect ratio отсекается до GPU enqueue.
+- **Экономия GPU:** большая часть сцен может быть статичной генерацией + лёгким zoom/pan; bounded `PUBLIC_IMAGE` сцены реально обходят diffusion через лицензированные Wikimedia Commons материалы с local fallback; число Wan I2V сцен задаётся Director budget, а несовместимый aspect ratio отсекается до GPU enqueue.
 - **Character Hub continuity:** Director может закрепить одного canonical персонажа между сценами через reference artifacts/LoRA из ASC-AI Character Hub.
-- **Production manifest:** для каждой задачи сохраняется `production-manifest.json` с Scheduler job/stage/lease, seed/settings, artifact IDs, QC, fallback и фактическими выходами.
+- **Production manifest:** для каждой задачи сохраняется `production-manifest.json` с Scheduler job/stage/lease, seed/settings, artifact IDs, QC, fallback и фактическими выходами; для реально использованных Wikimedia-кадров отдельно создаются credits JSON/TXT.
 - **Headless API:** ASC-AI агент может планировать и запускать полный render через отдельный `/api/v1/asc-ai/*` namespace без знания внутреннего `VideoParams`.
 - **Устойчивое ASC-AI-развёртывание:** production overlay включает Redis с AOF; queued API jobs возобновляются после рестарта, а оборванные in-flight jobs становятся явно retryable вместо вечного `processing`.
 - Китайский README upstream сохранён как `README-upstream-zh.md` для удобной синхронизации.
@@ -113,11 +113,14 @@ GET  /api/v1/asc-ai/characters
 GET  /api/v1/asc-ai/characters/{character_id}
 POST /api/v1/asc-ai/director/plan
 POST /api/v1/asc-ai/production
+POST /api/v1/asc-ai/production/{task_id}/retry
 ```
 
 `POST /director/plan` выполняет только research/Character Hub preflight + scheduler-managed Qwen planning и **не запускает Image Adapter/Wan render**.
 
 `POST /production` выполняет полный local-only preflight, преобразует простой ASC-AI request в штатный `TaskVideoRequest` и ставит render в **тот же TaskManager/Redis queue**, что обычный `/videos`. Ответ возвращает обычный `task_id`; статус читается через `GET /api/v1/tasks/{task_id}`.
+
+Redis сохраняет queued jobs и durable JSON-safe snapshot запроса. После рестарта queued jobs автоматически продолжаются; task, который уже был взят worker'ом и оборвался вместе с процессом, помечается `retryable=true` вместо опасного автоматического replay. Его можно безопасно пересоздать через `POST /asc-ai/production/{task_id}/retry`; старая задача получит ссылку `retried_as` на новую.
 
 Для agent retries поддерживается persistent header `Idempotency-Key` (8–128 символов). Один и тот же ключ + тот же payload возвращает тот же детерминированный `task_id` без нового render; повтор ключа с другим payload возвращает `409`. Claim хранится в task state и переживает рестарт API.
 
