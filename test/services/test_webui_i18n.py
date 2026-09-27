@@ -30,6 +30,8 @@ ENGLISH_FALLBACK_KEYS = frozenset(
         "Director Target Duration Help",
         "Director Local Video Scenes",
         "Director Local Video Scenes Help",
+        "Director Public Image Scenes",
+        "Director Public Image Scenes Help",
         "Director Visual Style",
         "Director Audience",
         "Director Purpose",
