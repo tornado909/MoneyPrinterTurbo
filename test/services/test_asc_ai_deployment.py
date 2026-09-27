@@ -23,6 +23,8 @@ class TestAscAIDeployment(unittest.TestCase):
         )
         self.assertNotIn("@exp", source)
         self.assertIn("DEVICE=cpu", source)
+        self.assertIn("torch==2.6.0 torchaudio==2.6.0", source)
+        self.assertIn("https://download.pytorch.org/whl/cpu", source)
 
     def test_chatterbox_overlay_is_cpu_only_private_and_persistent(self):
         source = (ROOT / "docker-compose.chatterbox.yml").read_text(
@@ -76,6 +78,8 @@ class TestAscAIDeployment(unittest.TestCase):
         self.assertNotIn("./:/MoneyPrinterTurbo", overlay)
         self.assertIn("/srv/ai-data:/srv/ai-data", overlay)
         self.assertIn("docker-compose.release.yml", overlay)
+        self.assertIn('${MPT_BIND_HOST:-127.0.0.1}:8501:8501', release)
+        self.assertIn('${MPT_BIND_HOST:-127.0.0.1}:8080:8080', release)
 
     def test_acceptance_full_render_is_bounded_and_local_only(self):
         source = (
