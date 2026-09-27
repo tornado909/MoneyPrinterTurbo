@@ -381,6 +381,7 @@ def health(
     *,
     stop_at: str = "video",
     director_plan_ready: bool = False,
+    narration_audio_ready: bool = False,
 ) -> dict:
     """Check only dependencies required by the current local production path."""
     director_enabled = (
@@ -418,6 +419,7 @@ def health(
     needs_audio = stop_at not in {"script", "terms"}
     if (
         needs_audio
+        and not narration_audio_ready
         and not custom_audio
         and voice_mode == "tts"
         and tts_server == "chatterbox"
@@ -441,6 +443,7 @@ def preflight(
     *,
     stop_at: str = "video",
     director_plan_ready: bool = False,
+    narration_audio_ready: bool = False,
 ) -> dict:
     if not enabled():
         return {}
@@ -449,6 +452,7 @@ def preflight(
         params,
         stop_at=stop_at,
         director_plan_ready=director_plan_ready,
+        narration_audio_ready=narration_audio_ready,
     )
 
 
