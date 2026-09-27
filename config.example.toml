@@ -516,6 +516,11 @@ model_size = "large-v3-turbo"
 # "float16" or "int8_float16" for CUDA.
 device = "cpu"
 compute_type = "int8"
+# CPU-local defaults tuned for clean synthesized narration. Raise beam_size for
+# noisy uploaded speech if accuracy matters more than latency.
+cpu_threads = 4
+num_workers = 1
+beam_size = 1
 # Optional prompt that biases Whisper's decoder toward specific vocabulary
 # (brand names, technical terms). Passed as initial_prompt to transcribe().
 # Leave empty to disable.
