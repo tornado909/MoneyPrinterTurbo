@@ -23,7 +23,7 @@ class DirectorSceneCandidate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     scene_id: str = Field(default="", max_length=100)
-    narration: str = Field(default="", max_length=6000)
+    narration: str = Field(min_length=1, max_length=6000)
     duration_seconds: int = Field(default=7, ge=2, le=15)
     visual_strategy: Literal["LOCAL_IMAGE", "LOCAL_VIDEO"] = "LOCAL_IMAGE"
     visual_prompt: str = Field(min_length=1, max_length=6000)
@@ -314,6 +314,17 @@ def _normalize(raw: dict, params) -> dict:
                 for row in exc.errors()[:8]
             )
         ) from exc
+
+    script_compact = re.sub(r"\s+", "", candidate.script)
+    narration_compact = "".join(
+        re.sub(r"\s+", "", row.narration)
+        for row in candidate.scenes
+    )
+    if narration_compact != script_compact:
+        raise DirectorError(
+            "Director scene narrations must partition the script verbatim and "
+            "in order; concatenated scene narration does not match script"
+        )
 
     max_video = max(
         0, int(getattr(params, "director_max_local_video_scenes", 1))
