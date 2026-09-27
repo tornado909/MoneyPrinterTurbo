@@ -273,7 +273,7 @@ class TestAscAIIntegration(unittest.TestCase):
                 "task",
                 {
                     "scene_id": "scene_01",
-                    "duration_seconds": 5,
+                    "duration_seconds": 11,
                     "visual_prompt": "greenhouse",
                     "motion_prompt": "slow push in",
                 },
@@ -771,7 +771,7 @@ class TestAscAIIntegration(unittest.TestCase):
 
         self.assertEqual(
             [row["duration_seconds"] for row in result["scenes"]],
-            [10, 5, 15],
+            [8, 7, 15],
         )
         self.assertEqual(result["timing"]["effective_scene_seconds"], 30)
         self.assertTrue(result["timing"]["fully_matched"])
@@ -781,7 +781,7 @@ class TestAscAIIntegration(unittest.TestCase):
             [5, 5, 10],
         )
 
-    def test_retime_director_plan_reports_unreachable_audio_duration(self):
+    def test_retime_director_plan_can_extend_video_scene_without_extra_wan_job(self):
         plan = {
             "scenes": [
                 {
@@ -792,9 +792,24 @@ class TestAscAIIntegration(unittest.TestCase):
             ]
         }
         result = asc_ai.retime_director_plan(plan, 12.0)
-        self.assertEqual(result["scenes"][0]["duration_seconds"], 5)
+        self.assertEqual(result["scenes"][0]["duration_seconds"], 12)
+        self.assertTrue(result["timing"]["fully_matched"])
+        self.assertEqual(result["timing"]["feasible_max_seconds"], 15)
+
+    def test_retime_director_plan_reports_only_true_typed_bound_overflow(self):
+        plan = {
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "visual_strategy": "LOCAL_VIDEO",
+                    "duration_seconds": 5,
+                }
+            ]
+        }
+        result = asc_ai.retime_director_plan(plan, 25.0)
+        self.assertEqual(result["scenes"][0]["duration_seconds"], 15)
         self.assertFalse(result["timing"]["fully_matched"])
-        self.assertEqual(result["timing"]["feasible_max_seconds"], 5)
+        self.assertEqual(result["timing"]["feasible_max_seconds"], 15)
 
     @patch("app.services.asc_ai_qc.quality_control")
     def test_quality_control_uses_canonical_qc_module(self, qc):
