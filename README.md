@@ -49,11 +49,16 @@ git clone https://github.com/tornado909/MoneyPrinterTurbo.git
 cd MoneyPrinterTurbo
 cp config.example.toml config.toml
 
+# Production: MoneyPrinterTurbo берётся из образа форка в GHCR.
 docker compose \
-  -f docker-compose.yml \
+  -f docker-compose.release.yml \
   -f docker-compose.asc-ai.yml \
   -f docker-compose.chatterbox.yml \
   up -d --build
+
+# Development из текущего checkout:
+# docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml \
+#   -f docker-compose.chatterbox.yml up -d --build
 
 # Один раз загрузите русский reference voice:
 bash scripts/bootstrap-chatterbox-ru-voice.sh /path/to/russian-reference.wav
