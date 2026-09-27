@@ -128,6 +128,7 @@ class VideoParams(BaseModel):
     # None follows global [asc_ai] public_research_enabled; True/False is a
     # per-task override used by WebUI/headless ASC-AI production requests.
     director_public_research_enabled: Optional[bool] = None
+    director_public_media_enabled: Optional[bool] = None
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )
