@@ -585,7 +585,7 @@
     "ASC-AI Ready": "ASC-AI services are reachable",
     "ASC-AI Unavailable": "ASC-AI preflight failed: {error}",
     "Director Public Research": "Public factual research",
-    "Director Public Research Help": "Send only the video topic to Wikipedia/MediaWiki and feed up to two short public extracts to the local Director. No paid AI API is used. Disable this for private or purely creative topics.",
+    "Director Public Research Help": "Opt in to sending the video topic to Wikipedia/MediaWiki and feed bounded public extracts to the local Director. Keep disabled for private or confidential topics.",
     "Director Character": "Recurring Character",
     "No Director Character": "No Character Hub identity",
     "Director Character Help": "Optional. Select a Character Hub identity to anchor the same character across generated scenes. Canonical reference artifacts/LoRA are used when the manifest provides them.",
@@ -598,6 +598,9 @@
     "Cloud APIs Disabled": "Cloud AI APIs are disabled by strict local-only mode.",
     "Local Production Stack Help": "MoneyPrinterTurbo will use only the local ASC-AI control plane for AI generation. No cloud AI credentials are required for this production path.",
     "Director Public Image Scenes": "Open photo scenes",
-    "Director Public Image Scenes Help": "Maximum number of factual scenes Director may source from freely licensed Wikimedia Commons images before falling back to local generation. Set 0 to disable public-media egress for this task."
+    "Director Public Image Scenes Help": "Maximum number of factual scenes Director may source from freely licensed Wikimedia Commons images before falling back to local generation. Set 0 to disable public-media egress for this task.",
+    "Director Public Media": "Wikimedia visual search",
+    "Director Public Media Help": "Opt in to sending Director scene search phrases to Wikimedia Commons. Only reusable licensed images are accepted; failures fall back to local generation.",
+    "Director Public Egress Warning": "Public egress is enabled for this task. The topic and/or scene search phrases may be sent to Wikipedia/Wikimedia; AI inference remains local."
   }
 }
