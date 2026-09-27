@@ -49,7 +49,8 @@ git clone https://github.com/tornado909/MoneyPrinterTurbo.git
 cd MoneyPrinterTurbo
 cp config.example.toml config.toml
 
-# Production: MoneyPrinterTurbo берётся из образа форка в GHCR.
+# Production: используется образ форка из GHCR; пока он не опубликован,
+# Compose собирает тот же fork локально из текущего checkout.
 docker compose \
   -f docker-compose.release.yml \
   -f docker-compose.asc-ai.yml \
