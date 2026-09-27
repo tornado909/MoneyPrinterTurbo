@@ -22,6 +22,7 @@ from moviepy import (
     CompositeAudioClip,
     CompositeVideoClip,
     ImageClip,
+    concatenate_videoclips,
     TextClip,
     VideoFileClip,
     afx,
@@ -1529,6 +1530,83 @@ def generate_video(
             fps=fps,
         )
         return bgm_mix_succeeded
+
+
+def fit_director_video_duration(
+    video_path: str,
+    image_path: str,
+    target_duration: float,
+) -> str:
+    """Fit one canonical Wan scene to Director timing without another GPU job.
+
+    The validated ASC-AI Wan baseline remains untouched. If Director needs less
+    time, the approved video is trimmed. If it needs more, the generated source
+    image is held as a subtle zoom tail. The result is a normal scene clip that
+    downstream montage can treat exactly like a still-rendered scene.
+    """
+    target = max(2.0, min(15.0, float(target_duration or 5.0)))
+    source = _open_video_clip_quietly(video_path)
+    try:
+        native_duration = float(source.duration or 0.0)
+        if native_duration <= 0:
+            raise ValueError("Director Wan clip has no measurable duration")
+        if abs(native_duration - target) <= 0.05:
+            return video_path
+
+        output_path = str(
+            Path(video_path).with_name(Path(video_path).stem + ".timed.mp4")
+        )
+        if native_duration > target:
+            trimmed = source.subclipped(0, target)
+            try:
+                _write_videofile_with_codec_fallback(
+                    trimmed,
+                    output_path,
+                    codec=_get_configured_video_codec(),
+                    audio=False,
+                    fps=fps,
+                    logger=None,
+                )
+            finally:
+                close_clip(trimmed)
+            return output_path
+
+        remaining = target - native_duration
+        tail = (
+            ImageClip(image_path)
+            .with_duration(remaining)
+            .resized(new_size=source.size)
+            .with_position("center")
+        )
+        try:
+            # Keep the extension visually alive instead of a perfectly frozen
+            # hold, but do not ask any neural model to create extra motion.
+            zoom_tail = tail.resized(
+                lambda t: 1 + 0.02 * (t / max(remaining, 0.001))
+            )
+            try:
+                combined = concatenate_videoclips(
+                    [source, zoom_tail],
+                    method="compose",
+                ).with_duration(target)
+                try:
+                    _write_videofile_with_codec_fallback(
+                        combined,
+                        output_path,
+                        codec=_get_configured_video_codec(),
+                        audio=False,
+                        fps=fps,
+                        logger=None,
+                    )
+                finally:
+                    close_clip(combined)
+            finally:
+                close_clip(zoom_tail)
+        finally:
+            close_clip(tail)
+        return output_path
+    finally:
+        close_clip(source)
 
 
 _DIRECTOR_TRANSITIONS = {
