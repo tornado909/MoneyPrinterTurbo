@@ -596,6 +596,8 @@
     "Local AI Scheduler Help": "Допуск к GPU и жизненный цикл модели контролирует ASC-AI Scheduler: {scheduler}",
     "Local Production Stack": "Локальный production stack",
     "Cloud APIs Disabled": "Облачные AI API отключены строгим local-only режимом.",
-    "Local Production Stack Help": "MoneyPrinterTurbo использует для AI-генерации только локальный control plane ASC-AI. Ключи облачных AI-сервисов для этого production-пути не требуются."
+    "Local Production Stack Help": "MoneyPrinterTurbo использует для AI-генерации только локальный control plane ASC-AI. Ключи облачных AI-сервисов для этого production-пути не требуются.",
+    "Director Public Image Scenes": "Сцены с открытыми фото",
+    "Director Public Image Scenes Help": "Максимальное число фактических сцен, для которых Director может взять свободно лицензированное фото Wikimedia Commons вместо локальной генерации. 0 полностью отключает public-media egress для этой задачи."
   }
 }
