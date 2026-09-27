@@ -55,6 +55,8 @@ MoneyPrinterTurbo используется как production/editor слой, а
 
 ASC-AI overlay также поднимает отдельный `redis:7-alpine` только во внутренней сети MoneyPrinterTurbo. Он хранит очередь и состояние задач с AOF; наружу порт Redis не публикуется.
 
+При рестарте API persisted **queued** задачи автоматически снова занимают свободные worker slots. Задача, которая уже была извлечена из очереди и выполнялась в момент падения процесса, не запускается повторно автоматически: её состояние переводится в `failed` с `failed_stage=startup_recovery`, `retryable=true` и `recovery_action=resubmit`. Это сознательная защита от двойной TTS/рендер/публикации. WebUI имеет отдельный in-process executor и recovery API-очереди его задачи не трогает.
+
 WebUI: `http://127.0.0.1:8501`
 
 API: `http://127.0.0.1:8080/docs`
