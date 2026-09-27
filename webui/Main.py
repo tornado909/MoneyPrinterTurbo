@@ -245,6 +245,7 @@ _WINDOWS_RESERVED_FILENAMES = frozenset(
 )
 _RUNTIME_CONFIG_SECTIONS = {
     "app": config.app,
+    "asc_ai": config.asc_ai,
     "azure": config.azure,
     "chatterbox": config.chatterbox,
     "kokoro": config.kokoro,
