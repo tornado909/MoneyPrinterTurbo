@@ -512,16 +512,18 @@ class TestAscAIIntegration(unittest.TestCase):
 
     def test_director_schema_enforces_video_budget_after_validation(self):
         raw = {
-            "script": "Текст",
+            "script": "Первая часть. Вторая часть.",
             "scenes": [
                 {
                     "scene_id": "scene_01",
+                    "narration": "Первая часть.",
                     "duration_seconds": 5,
                     "visual_strategy": "LOCAL_VIDEO",
                     "visual_prompt": "first",
                 },
                 {
                     "scene_id": "scene_02",
+                    "narration": "Вторая часть.",
                     "duration_seconds": 5,
                     "visual_strategy": "LOCAL_VIDEO",
                     "visual_prompt": "second",
@@ -538,6 +540,58 @@ class TestAscAIIntegration(unittest.TestCase):
         )
         self.assertEqual(result["scenes"][0]["duration_seconds"], 5)
         self.assertEqual(result["scenes"][1]["duration_seconds"], 5)
+
+    def test_director_schema_rejects_scene_narration_that_does_not_match_script(self):
+        raw = {
+            "script": "Первая часть. Вторая часть.",
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "narration": "Первая часть.",
+                    "duration_seconds": 5,
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "visual_prompt": "first",
+                },
+                {
+                    "scene_id": "scene_02",
+                    "narration": "Совсем другой текст.",
+                    "duration_seconds": 5,
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "visual_prompt": "second",
+                },
+            ],
+        }
+        with self.assertRaisesRegex(
+            asc_ai_director.DirectorError,
+            "partition the script verbatim",
+        ):
+            asc_ai_director._normalize(raw, self.params())
+
+    def test_retime_prefers_verbatim_scene_narration_length_over_initial_guess(self):
+        plan = {
+            "scenes": [
+                {
+                    "scene_id": "short",
+                    "narration": "Коротко.",
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "duration_seconds": 10,
+                },
+                {
+                    "scene_id": "long",
+                    "narration": "Это заметно более длинная часть озвучки для второй сцены.",
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "duration_seconds": 2,
+                },
+            ]
+        }
+        result = asc_ai.retime_director_plan(plan, 16.0)
+        durations = [row["duration_seconds"] for row in result["scenes"]]
+        self.assertEqual(sum(durations), 16)
+        self.assertLess(durations[0], durations[1])
+        self.assertEqual(
+            result["timing"]["weight_source"],
+            "scene_narration_characters",
+        )
 
     def test_scene_postprocess_executes_director_transition_and_callout(self):
         with tempfile.TemporaryDirectory() as temp_dir, (
