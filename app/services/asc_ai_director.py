@@ -114,14 +114,38 @@ class DirectorPlanCandidate(BaseModel):
 
 def _json_request(method: str, url: str, **kwargs) -> Any:
     timeout = kwargs.pop("timeout", (5, 30))
+    response = None
     try:
         response = requests.request(method, url, timeout=timeout, **kwargs)
         response.raise_for_status()
         return response.json()
+    except requests.HTTPError as exc:
+        status = getattr(response, "status_code", None)
+        body = ""
+        if response is not None:
+            try:
+                body = str(response.text or "").strip()
+            except Exception:
+                body = ""
+        if len(body) > 600:
+            body = body[:600] + "..."
+        endpoint = urlparse(url).path or "/"
+        detail = f"HTTP {status}" if status is not None else "HTTP error"
+        if body:
+            detail += f": {body}"
+        raise DirectorError(
+            f"ASC-AI request failed at {endpoint}: {detail}"
+        ) from exc
     except requests.RequestException as exc:
-        raise DirectorError(f"ASC-AI request failed: {type(exc).__name__}") from exc
+        endpoint = urlparse(url).path or "/"
+        raise DirectorError(
+            f"ASC-AI request failed at {endpoint}: {type(exc).__name__}: {exc}"
+        ) from exc
     except ValueError as exc:
-        raise DirectorError("ASC-AI returned invalid JSON") from exc
+        endpoint = urlparse(url).path or "/"
+        raise DirectorError(
+            f"ASC-AI returned invalid JSON at {endpoint}"
+        ) from exc
 
 
 class SchedulerManagedLocalLLM:
