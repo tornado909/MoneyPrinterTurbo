@@ -98,8 +98,7 @@ MoneyPrinterTurbo публикует отдельный authenticated namespace 
     GET  /api/v1/asc-ai/characters/{character_id}
     POST /api/v1/asc-ai/director/plan
     POST /api/v1/asc-ai/production
-    POST /api/v1/asc-ai/tasks/{task_id}/retry
-    POST /api/v1/asc-ai/production/{task_id}/retry
+        POST /api/v1/asc-ai/production/{task_id}/retry
 
 Director preview является planning-only: Scheduler/Qwen/Character Hub/research разрешены, но Image Adapter/Wan не запускаются.
 
@@ -117,12 +116,14 @@ Task ID детерминирован от ключа, а canonical request finge
 
 ### Recovery после рестарта
 
+Старый `/api/v1/asc-ai/tasks/{task_id}/retry` сохранён как совместимый alias и вызывает тот же canonical handler.
+
 ASC-AI production использует Redis-backed API queue:
 
 - ещё не запущенные queued tasks остаются в Redis и автоматически возобновляют dispatch после старта API;
 - уже выполнявшаяся задача не replay'ится автоматически, потому что её queue entry уже была извлечена и повтор мог бы продублировать GPU/рендер работу;
 - такая задача переводится в failed с `failed_stage=startup_recovery`, `retryable=true`, `recovery_action=resubmit`;
-- `POST /api/v1/asc-ai/tasks/{task_id}/retry` создаёт детерминированный child task и повторно ставит сохранённый `request_params` в общую очередь;
+- `POST /api/v1/asc-ai/production/{task_id}/retry` создаёт детерминированный child task и повторно ставит сохранённый `request_params` в общую очередь;
 - повторный вызов retry endpoint возвращает того же child, а не создаёт дубль;
 - parent хранит `last_retry_task_id`, child хранит `retry_of` и `recovery_generation`.
 
