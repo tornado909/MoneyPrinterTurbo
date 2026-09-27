@@ -593,6 +593,9 @@
     "Character Hub Unavailable": "Character Hub is unavailable: {error}",
     "Local AI Runtime": "Local AI Runtime",
     "Local AI Runtime Help": "Strict local-only mode is active. All text generation is routed to the ASC-AI scheduler-managed Qwen runtime; cloud LLM credentials are not used.",
-    "Local AI Scheduler Help": "GPU admission and model lifecycle are controlled by ASC-AI Scheduler: {scheduler}"
+    "Local AI Scheduler Help": "GPU admission and model lifecycle are controlled by ASC-AI Scheduler: {scheduler}",
+    "Local Production Stack": "Local Production Stack",
+    "Cloud APIs Disabled": "Cloud AI APIs are disabled by strict local-only mode.",
+    "Local Production Stack Help": "MoneyPrinterTurbo will use only the local ASC-AI control plane for AI generation. No cloud AI credentials are required for this production path."
   }
 }
