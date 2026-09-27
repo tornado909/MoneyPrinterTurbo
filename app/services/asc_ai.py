@@ -1269,6 +1269,114 @@ def persist_execution_plan(task_id: str, plan: dict) -> str:
     return str(target)
 
 
+def _resume_scene_matches(record: dict, scene: dict) -> bool:
+    if not isinstance(record, dict):
+        return False
+    if not str(record.get("final_output") or "").strip():
+        return False
+    if str(record.get("scene_id") or "") != str(scene.get("scene_id") or ""):
+        return False
+    if str(record.get("requested_strategy") or "") != str(
+        scene.get("visual_strategy") or ""
+    ):
+        return False
+    if str(record.get("visual_prompt") or "") != str(
+        scene.get("visual_prompt") or ""
+    ):
+        return False
+    if str(record.get("motion_prompt") or "") != str(
+        scene.get("motion_prompt") or ""
+    ):
+        return False
+    try:
+        old_duration = int(record.get("effective_duration_seconds") or 0)
+        new_duration = int(scene.get("duration_seconds") or 0)
+    except (TypeError, ValueError):
+        return False
+    if old_duration != new_duration or old_duration <= 0:
+        return False
+
+    old_character = record.get("character") or {}
+    new_character = scene.get("character_identity") or {}
+    if str(old_character.get("character_id") or "") != str(
+        new_character.get("character_id") or ""
+    ):
+        return False
+
+    post = record.get("postprocess") or {}
+    if str(post.get("transition") or "cut").lower() != str(
+        scene.get("transition") or "cut"
+    ).lower():
+        return False
+    if str(post.get("overlay_text") or "") != str(
+        scene.get("overlay_text") or ""
+    ):
+        return False
+    return True
+
+
+def _stage_resumed_scene(
+    source_task_id: str,
+    target_task_id: str,
+    scene_id: str,
+    source_path: str,
+    expected_duration: int,
+) -> str:
+    source = Path(source_path).resolve()
+    if not source.is_file():
+        raise AscAIError("saved scene output is missing")
+    if source.suffix.lower() not in {".mp4", ".mov", ".mkv", ".webm"}:
+        raise AscAIError("saved scene output is not a supported video")
+
+    source_task_root = Path(utils.task_dir(source_task_id)).resolve()
+    shared_root = Path(
+        str(_setting("shared_data_root", "/srv/ai-data"))
+    ).resolve()
+    allowed = False
+    for root in (source_task_root, shared_root):
+        try:
+            source.relative_to(root)
+            allowed = True
+            break
+        except ValueError:
+            continue
+    if not allowed:
+        raise AscAIError("saved scene output is outside trusted resume roots")
+
+    clip = video._open_video_clip_quietly(str(source))
+    try:
+        actual_duration = float(clip.duration or 0.0)
+    finally:
+        video.close_clip(clip)
+    if actual_duration <= 0 or abs(actual_duration - expected_duration) > 0.35:
+        raise AscAIError(
+            "saved scene output duration does not match Director execution plan"
+        )
+
+    target_root = Path(utils.task_dir(target_task_id)).resolve()
+    target_dir = (target_root / "resumed-scenes").resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        target_dir.relative_to(target_root)
+    except ValueError as exc:
+        raise AscAIError("unsafe resumed scene target path") from exc
+    target = (
+        target_dir
+        / f"{_safe_token(scene_id)}{source.suffix.lower()}"
+    ).resolve()
+    try:
+        target.relative_to(target_root)
+    except ValueError as exc:
+        raise AscAIError("unsafe resumed scene output path") from exc
+    if target.exists():
+        target.unlink()
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+    return str(target)
+
+
 def persist_production_manifest(task_id: str, manifest: dict) -> str:
     target = Path(utils.task_dir(task_id)) / "production-manifest.json"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -1286,10 +1394,27 @@ def generate_scene_materials(
     audio_duration: float,
     aspect: Any,
     clip_duration: int,
+    *,
+    resume_from_task_id: str = "",
 ) -> list[str]:
     scenes = list(plan.get("scenes") or [])
     if not scenes:
         raise AscAIError("Director plan has no scenes")
+
+    resume_manifest = None
+    resume_records: dict[str, dict] = {}
+    if resume_from_task_id:
+        try:
+            resume_manifest = load_production_manifest(resume_from_task_id)
+        except AscAIError as exc:
+            logger.warning(
+                "production manifest cannot be reused; scenes will regenerate: "
+                f"source={resume_from_task_id}, error={exc}"
+            )
+        if isinstance(resume_manifest, dict):
+            for row in resume_manifest.get("scenes") or []:
+                if isinstance(row, dict) and str(row.get("scene_id") or ""):
+                    resume_records[str(row["scene_id"])] = row
 
     paths: list[str] = []
     used_public_media: list[dict] = []
@@ -1337,6 +1462,68 @@ def generate_scene_materials(
     try:
         for scene_index, scene in enumerate(scenes):
             working_scene = dict(scene)
+            scene_id = str(scene.get("scene_id") or f"scene_{scene_index + 1:02d}")
+            resume_record = resume_records.get(scene_id)
+            if resume_from_task_id and _resume_scene_matches(
+                resume_record or {},
+                working_scene,
+            ):
+                try:
+                    resumed_output = _stage_resumed_scene(
+                        resume_from_task_id,
+                        task_id,
+                        scene_id,
+                        str(resume_record.get("final_output") or ""),
+                        int(scene.get("duration_seconds") or 0),
+                    )
+                    scene_record = {
+                        "scene_id": scene_id,
+                        "requested_strategy": scene.get("visual_strategy"),
+                        "visual_prompt": scene.get("visual_prompt"),
+                        "motion_prompt": scene.get("motion_prompt"),
+                        "character": resume_record.get("character"),
+                        "image_workflow": resume_record.get("image_workflow"),
+                        "public_media": resume_record.get("public_media"),
+                        "image_attempts": [],
+                        "video": None,
+                        "fallback": None,
+                        "postprocess": None,
+                        "final_output": resumed_output,
+                        "effective_duration_seconds": int(
+                            scene.get("duration_seconds") or 0
+                        ),
+                        "image_source": resume_record.get("image_source"),
+                        "resume": {
+                            "source_task_id": resume_from_task_id,
+                            "source_output": resume_record.get("final_output"),
+                            "reused": True,
+                        },
+                    }
+                    manifest["scenes"].append(scene_record)
+                    paths.append(resumed_output)
+                    manifest["outputs"] = list(paths)
+                    covered += int(scene.get("duration_seconds") or 0)
+                    public_row = resume_record.get("public_media")
+                    if (
+                        isinstance(public_row, dict)
+                        and resume_record.get("image_source")
+                        == "wikimedia_commons"
+                    ):
+                        used_public_media.append(dict(public_row))
+                    persist_production_manifest(task_id, manifest)
+                    logger.info(
+                        "reused completed Director scene from interrupted task: "
+                        f"scene={scene_id}, source={resume_from_task_id}"
+                    )
+                    if covered >= required:
+                        break
+                    continue
+                except AscAIError as exc:
+                    logger.warning(
+                        "saved scene cannot be reused; regenerating normally: "
+                        f"scene={scene_id}, error={exc}"
+                    )
+
             scene_binding = _image_binding(working_scene)
             scene_width, scene_height = _workflow_resolution(
                 scene_binding, aspect
