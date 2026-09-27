@@ -188,6 +188,7 @@ def capabilities(request: Request):
             "production": {
                 "submit_endpoint": "/api/v1/asc-ai/production",
                 "task_status_template": "/api/v1/tasks/{task_id}",
+                "retry_template": "/api/v1/asc-ai/production/{task_id}/retry",
                 "queued": True,
                 "uses_shared_task_manager": True,
                 "persistent_idempotency_header": "Idempotency-Key",
@@ -325,3 +326,57 @@ def production(request: Request, body: ProductionRequest):
         task_id_override=deterministic_task_id,
         initial_state_claimed=True,
     )
+
+
+
+@router.post(
+    "/asc-ai/production/{task_id}/retry",
+    summary="Resubmit a retryable interrupted ASC-AI production task",
+)
+def retry_production(request: Request, task_id: str):
+    previous = video_controller.sm.state.get_task(task_id)
+    if not previous:
+        raise HTTPException(status_code=404, detail="task not found")
+    if not bool(previous.get("retryable", False)):
+        raise HTTPException(
+            status_code=409,
+            detail="task is not marked retryable",
+        )
+
+    raw_params = previous.get("params")
+    if not isinstance(raw_params, dict):
+        raise HTTPException(
+            status_code=409,
+            detail="retryable task has no reusable parameter snapshot",
+        )
+    if str(raw_params.get("video_source") or "") != "asc_ai":
+        raise HTTPException(
+            status_code=409,
+            detail="only ASC-AI production tasks can be retried here",
+        )
+
+    try:
+        task_request = TaskVideoRequest(**raw_params)
+        asc_ai.preflight(task_request, stop_at="video")
+    except (ValueError, asc_ai.AscAIError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    response = video_controller.create_task(
+        request,
+        task_request,
+        stop_at="video",
+        state_metadata={
+            "retry_of": task_id,
+            "retry_reason": "manual_resubmit_after_interruption",
+        },
+    )
+    data = response.get("data") if isinstance(response, dict) else None
+    new_task_id = data.get("task_id") if isinstance(data, dict) else None
+    if isinstance(new_task_id, str) and new_task_id:
+        video_controller.sm.state.patch_task(
+            task_id,
+            retried_as=new_task_id,
+            retryable=False,
+            recovery_action="resubmitted",
+        )
+    return response
