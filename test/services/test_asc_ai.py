@@ -541,6 +541,65 @@ class TestAscAIIntegration(unittest.TestCase):
         self.assertEqual(result["scenes"][0]["duration_seconds"], 5)
         self.assertEqual(result["scenes"][1]["duration_seconds"], 5)
 
+    def test_supplied_script_is_partitioned_verbatim_even_if_qwen_paraphrases(self):
+        script = (
+            "Первая фраза про теплицу. "
+            "Вторая фраза объясняет досветку и микроклимат. "
+            "Третья фраза завершает рассказ."
+        )
+        raw = {
+            "script": "модель попыталась переписать исходный текст",
+            "scenes": [
+                {
+                    "scene_id": "scene_01",
+                    "narration": "Короткий пересказ первой части.",
+                    "duration_seconds": 5,
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "visual_prompt": "greenhouse exterior",
+                },
+                {
+                    "scene_id": "scene_02",
+                    "narration": "Очень длинный пересказ второй части с лишними словами.",
+                    "duration_seconds": 7,
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "visual_prompt": "greenhouse lighting",
+                },
+                {
+                    "scene_id": "scene_03",
+                    "narration": "Финал.",
+                    "duration_seconds": 4,
+                    "visual_strategy": "LOCAL_IMAGE",
+                    "visual_prompt": "healthy plants",
+                },
+            ],
+        }
+
+        result = asc_ai_director._normalize(
+            raw,
+            self.params(video_script=script),
+        )
+
+        narrations = [row["narration"] for row in result["scenes"]]
+        self.assertEqual(
+            "".join(value.split() for value in narrations),
+            "".join(script.split()),
+        )
+        self.assertEqual(result["script"], script)
+        self.assertTrue(narrations[0].startswith("Первая фраза"))
+        self.assertTrue(narrations[-1].endswith("завершает рассказ."))
+        self.assertNotIn("пересказ", " ".join(narrations).lower())
+
+    def test_verbatim_partition_prefers_natural_boundaries(self):
+        script = "Один короткий факт. Второй факт немного длиннее. Третий факт."
+        parts = asc_ai_director._partition_script_verbatim(
+            script,
+            [5, 10, 5],
+        )
+        self.assertEqual(len(parts), 3)
+        self.assertEqual("".join(x.split() for x in parts), "".join(script.split()))
+        self.assertTrue(parts[0].endswith("."))
+        self.assertTrue(parts[1].endswith("."))
+
     def test_director_schema_rejects_scene_narration_that_does_not_match_script(self):
         raw = {
             "script": "Первая часть. Вторая часть.",
