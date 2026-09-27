@@ -41,6 +41,22 @@ async def application_lifespan(_: FastAPI):
     from app.services import task as task_service
 
     task_service.recover_interrupted_cross_posts()
+
+    # The API production executor may use a persistent Redis queue. Resume
+    # queued work before accepting requests and make previously popped/running
+    # jobs explicitly retryable instead of leaving them stuck in processing.
+    from app.controllers.v1 import video as video_controller
+
+    recover_startup = getattr(video_controller.task_manager, "recover_startup", None)
+    if callable(recover_startup):
+        try:
+            recovery = recover_startup()
+            logger.info(f"task queue startup recovery: {recovery}")
+        except Exception as exc:
+            # A broken Redis recovery means queued jobs cannot be trusted. Keep
+            # the API process alive for diagnostics, but make the failure loud.
+            logger.exception(f"task queue startup recovery failed: {exc}")
+
     try:
         yield
     finally:
