@@ -29,14 +29,38 @@ _LOCAL_RUNTIME_HOSTS = {
 }
 
 
-def _assert_local_runtime_url(name: str, url: str) -> str:
+def _normalized_allowed_hosts(values: object) -> set[str]:
+    if isinstance(values, str):
+        values = [item.strip() for item in values.split(",") if item.strip()]
+    if not isinstance(values, (list, tuple, set)):
+        return set()
+    result = set()
+    for value in values:
+        host = str(value or "").strip().lower().rstrip(".")
+        if (
+            host
+            and len(host) <= 253
+            and re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", host)
+        ):
+            result.add(host)
+    return result
+
+
+def _assert_local_runtime_url(
+    name: str,
+    url: str,
+    additional_hosts: object = (),
+) -> str:
     value = str(url or "").strip().rstrip("/")
     parsed = urlparse(value)
     host = (parsed.hostname or "").lower().strip()
     if parsed.scheme not in {"http", "https"} or not host:
         raise DirectorError(f"{name} has an invalid local endpoint URL")
 
-    allowed = host in _LOCAL_RUNTIME_HOSTS or host.endswith(".local")
+    allowed_hosts = _LOCAL_RUNTIME_HOSTS | _normalized_allowed_hosts(
+        additional_hosts
+    )
+    allowed = host in allowed_hosts or host.endswith(".local")
     if not allowed:
         try:
             address = ipaddress.ip_address(host)
@@ -113,12 +137,14 @@ class SchedulerManagedLocalLLM:
         estimated_vram_mb: int = 7600,
         priority: int = 150,
         admission_timeout: float = 300.0,
+        allowed_hosts: object = (),
     ):
+        self.allowed_hosts = _normalized_allowed_hosts(allowed_hosts)
         self.scheduler_url = _assert_local_runtime_url(
-            "scheduler_url", scheduler_url
+            "scheduler_url", scheduler_url, self.allowed_hosts
         )
         self.server_url = _assert_local_runtime_url(
-            "prompt_llm_url", server_url
+            "prompt_llm_url", server_url, self.allowed_hosts
         )
         self.model_id = model_id
         self.model_name = model_name
@@ -685,6 +711,7 @@ on-screen callout materially improves the scene; when used, keep it concise
         estimated_vram_mb=int(settings.get("director_vram_mb", 7600)),
         priority=int(settings.get("director_priority", 150)),
         admission_timeout=float(settings.get("director_admission_timeout_seconds", 300)),
+        allowed_hosts=settings.get("local_service_hosts", []),
     )
     last_error: Exception | None = None
     current_prompt = prompt
