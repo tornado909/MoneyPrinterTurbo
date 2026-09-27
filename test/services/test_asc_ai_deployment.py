@@ -64,6 +64,14 @@ class TestAscAIDeployment(unittest.TestCase):
         self.assertIn('"asc_ai": config.asc_ai', source)
         self.assertIn('_set_runtime_config(', source)
 
+    def test_webui_asc_ai_mode_does_not_require_cloud_onboarding_or_reject_source(self):
+        source = (ROOT / "webui/Main.py").read_text(encoding="utf-8")
+        self.assertIn('if video_source != "asc_ai":', source)
+        self.assertIn('render_onboarding_tour(params.video_source)', source)
+        self.assertIn('"asc_ai",\n            "pexels"', source)
+        self.assertIn('os.getenv("MPT_CHATTERBOX_BASE_URL")', source)
+        self.assertIn('disabled=bool(runtime_chatterbox_base_url)', source)
+
     def test_main_dockerfile_uses_bookworm_and_never_reintroduces_bullseye(self):
         source = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("FROM python:3.11-slim-bookworm", source)
