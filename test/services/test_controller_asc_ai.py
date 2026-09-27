@@ -37,13 +37,14 @@ class TestAscAIController(unittest.TestCase):
         )
         self.assertEqual(
             data["egress_policy"]["public_http_default"],
-            "disabled-opt-in",
+            "enabled-cost-aware",
         )
         self.assertTrue(data["production"]["uses_shared_task_manager"])
         self.assertEqual(
             data["artifacts"]["evidence_template"],
             "/api/v1/asc-ai/production/{task_id}/evidence",
         )
+        self.assertEqual(data["artifacts"]["final_qc"], "final-qc.json")
 
     @patch.object(
         asc_ai_controller.asc_ai,
@@ -353,6 +354,10 @@ class TestAscAIController(unittest.TestCase):
                 json.dumps({"status": "complete", "outputs": ["final.mp4"]}),
                 encoding="utf-8",
             )
+            (task_dir / "final-qc.json").write_text(
+                json.dumps({"schema_version": "mpt.final-qc.v1", "status": "passed"}),
+                encoding="utf-8",
+            )
             with (
                 patch.object(
                     asc_ai_controller.video_controller.sm.state,
@@ -386,6 +391,7 @@ class TestAscAIController(unittest.TestCase):
             "complete",
         )
         self.assertIsNone(data["artifacts"]["director_execution_plan"])
+        self.assertEqual(data["artifacts"]["final_qc"]["status"], "passed")
         self.assertIsNone(data["artifacts"]["public_media_credits"])
 
     def test_production_evidence_returns_404_for_unknown_task(self):
