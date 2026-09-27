@@ -57,6 +57,14 @@ class TestAscAIDeployment(unittest.TestCase):
             config_text + voice + controller,
         )
 
+    def test_main_dockerfile_uses_bookworm_and_never_reintroduces_bullseye(self):
+        source = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("FROM python:3.11-slim-bookworm", source)
+        self.assertIn("bookworm-security", source)
+        self.assertIn("Acquire::Retries=5", source)
+        self.assertNotIn("slim-bullseye", source)
+        self.assertNotIn("bullseye-security", source)
+
     def test_asc_ai_overlay_does_not_shadow_release_image_code(self):
         overlay = (ROOT / "docker-compose.asc-ai.yml").read_text(encoding="utf-8")
         release = (ROOT / "docker-compose.release.yml").read_text(encoding="utf-8")
