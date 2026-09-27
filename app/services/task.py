@@ -635,6 +635,7 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
             audio_file=audio_file,
             subtitle_file=subtitle_path,
             word_level=is_word_level,
+            language=getattr(params, "video_language", None),
         )
         if not is_word_level:
             logger.info("\n\n## correcting subtitle")
