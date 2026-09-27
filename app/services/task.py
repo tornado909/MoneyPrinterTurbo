@@ -1499,6 +1499,25 @@ def _run_pipeline(
 ):
     logger.info(f"start task: {task_id}, stop_at: {stop_at}")
     retry_source_task_id = _retry_source_task_id(task_id)
+    resume_director_plan = None
+    if retry_source_task_id and getattr(params, "director_enabled", False):
+        try:
+            resume_director_plan = asc_ai.load_director_plan(
+                retry_source_task_id
+            )
+        except asc_ai.AscAIError as exc:
+            logger.warning(
+                "saved Director plan cannot be reused; normal planning will run: "
+                f"source={retry_source_task_id}, error={exc}"
+            )
+        if resume_director_plan:
+            requested_script = str(params.video_script or "").strip()
+            resumed_script = str(
+                resume_director_plan.get("script") or ""
+            ).strip()
+            if requested_script and requested_script != resumed_script:
+                resume_director_plan = None
+
     sm.state.update_task(
         task_id,
         state=const.TASK_STATE_PROCESSING,
@@ -1507,7 +1526,11 @@ def _run_pipeline(
     )
 
     try:
-        asc_ai.preflight(params, stop_at=stop_at)
+        asc_ai.preflight(
+            params,
+            stop_at=stop_at,
+            director_plan_ready=resume_director_plan is not None,
+        )
     except asc_ai.AscAIError as exc:
         return _mark_task_failed(task_id, "preflight", str(exc))
 
@@ -1625,17 +1648,8 @@ def _run_pipeline(
     director_plan = None
     if getattr(params, "director_enabled", False):
         try:
-            if retry_source_task_id:
-                director_plan = asc_ai.load_director_plan(retry_source_task_id)
-                if director_plan:
-                    requested_script = str(params.video_script or "").strip()
-                    resumed_script = str(director_plan.get("script") or "").strip()
-                    if requested_script and requested_script != resumed_script:
-                        logger.warning(
-                            "saved Director plan does not match requested script; "
-                            "planning again instead of resuming"
-                        )
-                        director_plan = None
+            if resume_director_plan is not None:
+                director_plan = resume_director_plan
             if director_plan is None:
                 director_plan = asc_ai.create_director_plan(params)
             else:
