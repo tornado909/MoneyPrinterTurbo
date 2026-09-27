@@ -54,7 +54,11 @@ def _metadata_value(metadata: dict, key: str, *, max_chars: int = 2000) -> str:
     return _clean(metadata.get(key), max_chars=max_chars)
 
 
-def _license_is_reusable(short_name: str) -> bool:
+def _license_is_reusable(
+    short_name: str,
+    *,
+    allow_share_alike: bool = False,
+) -> bool:
     """Allow only licenses safe for edited/commercial video reuse.
 
     Wikimedia's LicenseShortName can contain CC BY-NC / CC BY-ND variants.
@@ -67,6 +71,11 @@ def _license_is_reusable(short_name: str) -> bool:
     if re.search(
         r"(?:^|[-\s])(?:nc|nd)(?:[-\s]|$)|non[-\s]?commercial|no[-\s]?derivatives",
         normalized,
+    ):
+        return False
+    if (
+        not allow_share_alike
+        and re.search(r"(?:^|[-\s])sa(?:[-\s]|$)|share[-\s]?alike", normalized)
     ):
         return False
     return any(marker in normalized for marker in _LICENSE_MARKERS)
@@ -146,6 +155,7 @@ def search_commons_images(
     thumb_width: int = 1600,
     timeout: float = 10.0,
     cache_ttl_seconds: float = 3600.0,
+    allow_share_alike: bool = False,
     user_agent: str = (
         "MoneyPrinterTurbo-RU/1.0 "
         "(https://github.com/tornado909/MoneyPrinterTurbo)"
@@ -160,7 +170,13 @@ def search_commons_images(
     thumb_width = max(640, min(2048, int(thumb_width)))
     timeout = max(1.0, min(30.0, float(timeout)))
     cache_ttl_seconds = max(0.0, min(86400.0, float(cache_ttl_seconds)))
-    cache_key = (query.casefold(), aspect, max_results, thumb_width)
+    cache_key = (
+        query.casefold(),
+        aspect,
+        max_results,
+        thumb_width,
+        bool(allow_share_alike),
+    )
     now = time.monotonic()
 
     if cache_ttl_seconds:
@@ -228,7 +244,10 @@ def search_commons_images(
         license_name = _metadata_value(
             metadata, "LicenseShortName", max_chars=120
         )
-        if not _license_is_reusable(license_name):
+        if not _license_is_reusable(
+            license_name,
+            allow_share_alike=allow_share_alike,
+        ):
             continue
 
         media_url = _safe_wikimedia_url(
@@ -373,6 +392,7 @@ def acquire_commons_image(
     timeout: float = 12.0,
     cache_ttl_seconds: float = 3600.0,
     max_bytes: int = 20 * 1024 * 1024,
+    allow_share_alike: bool = False,
     user_agent: str = (
         "MoneyPrinterTurbo-RU/1.0 "
         "(https://github.com/tornado909/MoneyPrinterTurbo)"
@@ -384,6 +404,7 @@ def acquire_commons_image(
         max_results=max_results,
         timeout=timeout,
         cache_ttl_seconds=cache_ttl_seconds,
+        allow_share_alike=allow_share_alike,
         user_agent=user_agent,
     )
     if not candidates:
