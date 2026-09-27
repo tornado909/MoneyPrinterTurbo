@@ -33,6 +33,10 @@ class TestAscAIController(unittest.TestCase):
             data["production"]["submit_endpoint"],
             "/api/v1/asc-ai/production",
         )
+        self.assertEqual(
+            data["egress_policy"]["public_http_default"],
+            "disabled-opt-in",
+        )
         self.assertTrue(data["production"]["uses_shared_task_manager"])
         self.assertEqual(
             data["artifacts"]["evidence_template"],
@@ -90,6 +94,7 @@ class TestAscAIController(unittest.TestCase):
                 "max_local_video_scenes": 0,
                 "character_id": "aria",
                 "public_research_enabled": False,
+                "public_media_enabled": True,
             },
         )
         self.assertEqual(response.status_code, 200)
@@ -103,7 +108,10 @@ class TestAscAIController(unittest.TestCase):
         self.assertEqual(preflight.call_args.kwargs["stop_at"], "script")
         self.assertEqual(
             create_plan.call_args.kwargs["settings_overrides"],
-            {"public_research_enabled": False},
+            {
+                "public_research_enabled": False,
+                "public_media_enabled": True,
+            },
         )
 
     @patch.object(asc_ai_controller.video_controller, "create_task")
@@ -131,6 +139,7 @@ class TestAscAIController(unittest.TestCase):
                 "purpose": "обучающий ролик",
                 "character_id": "aria",
                 "public_research_enabled": False,
+                "public_media_enabled": True,
                 "subtitle_enabled": True,
                 "bgm_type": "random",
                 "bgm_volume": 0.15,
@@ -146,6 +155,7 @@ class TestAscAIController(unittest.TestCase):
         self.assertEqual(task_request.director_target_duration_seconds, 35)
         self.assertEqual(task_request.director_character_id, "aria")
         self.assertFalse(task_request.director_public_research_enabled)
+        self.assertTrue(task_request.director_public_media_enabled)
         self.assertEqual(task_request.bgm_type, "random")
         self.assertTrue(task_request.subtitle_enabled)
         preflight.assert_called_once()
