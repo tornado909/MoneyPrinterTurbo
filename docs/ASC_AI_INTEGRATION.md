@@ -98,6 +98,7 @@ MoneyPrinterTurbo публикует отдельный authenticated namespace 
     GET  /api/v1/asc-ai/characters/{character_id}
     POST /api/v1/asc-ai/director/plan
     POST /api/v1/asc-ai/production
+    POST /api/v1/asc-ai/tasks/{task_id}/retry
     POST /api/v1/asc-ai/production/{task_id}/retry
 
 Director preview является planning-only: Scheduler/Qwen/Character Hub/research разрешены, но Image Adapter/Wan не запускаются.
@@ -113,6 +114,17 @@ Production endpoint делает полный local-only preflight и стави
 Task ID детерминирован от ключа, а canonical request fingerprint сохраняется атомарно через Redis/Memory state. Повтор того же ключа и payload не ставит вторую задачу; тот же ключ с другим payload получает HTTP 409.
 
 Никакой второй очереди или отдельного renderer lifecycle для ASC-AI API не создаётся.
+
+### Recovery после рестарта
+
+ASC-AI production использует Redis-backed API queue:
+
+- ещё не запущенные queued tasks остаются в Redis и автоматически возобновляют dispatch после старта API;
+- уже выполнявшаяся задача не replay'ится автоматически, потому что её queue entry уже была извлечена и повтор мог бы продублировать GPU/рендер работу;
+- такая задача переводится в failed с `failed_stage=startup_recovery`, `retryable=true`, `recovery_action=resubmit`;
+- `POST /api/v1/asc-ai/tasks/{task_id}/retry` создаёт детерминированный child task и повторно ставит сохранённый `request_params` в общую очередь;
+- повторный вызов retry endpoint возвращает того же child, а не создаёт дубль;
+- parent хранит `last_retry_task_id`, child хранит `retry_of` и `recovery_generation`.
 
 ## Экономия GPU
 
