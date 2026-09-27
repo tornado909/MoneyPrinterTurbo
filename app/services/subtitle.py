@@ -16,6 +16,9 @@ from app.utils import utils
 model_size = config.whisper.get("model_size", "large-v3")
 device = config.whisper.get("device", "cpu")
 compute_type = config.whisper.get("compute_type", "int8")
+cpu_threads = max(0, int(config.whisper.get("cpu_threads", 4) or 0))
+num_workers = max(1, int(config.whisper.get("num_workers", 1) or 1))
+beam_size = max(1, min(10, int(config.whisper.get("beam_size", 1) or 1)))
 initial_prompt = config.whisper.get("initial_prompt", "") or None
 model = None
 
@@ -25,6 +28,7 @@ def create(
     subtitle_file: str = "",
     word_level: bool = False,
     log_details: bool = True,
+    language: str | None = None,
 ):
     global model
     if WhisperModel is None:
@@ -41,7 +45,11 @@ def create(
         )
         try:
             model = WhisperModel(
-                model_size_or_path=model_path, device=device, compute_type=compute_type
+                model_size_or_path=model_path,
+                device=device,
+                compute_type=compute_type,
+                cpu_threads=cpu_threads,
+                num_workers=num_workers,
             )
         except Exception as e:
             logger.error(
@@ -59,9 +67,14 @@ def create(
     if not subtitle_file:
         subtitle_file = f"{audio_file}.srt"
 
+    normalized_language = str(language or "").split("-", 1)[0].lower().strip()
+    if normalized_language in {"", "auto", "default"}:
+        normalized_language = None
+
     segments, info = model.transcribe(
         audio_file,
-        beam_size=5,
+        beam_size=beam_size,
+        language=normalized_language,
         word_timestamps=True,
         vad_filter=True,
         vad_parameters=dict(min_silence_duration_ms=500),

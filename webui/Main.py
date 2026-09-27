@@ -45,6 +45,7 @@ from app.models.schema import (
 )
 from app.services import bgm as bgm_service
 from app.services import (
+    asc_ai,
     cache_manager,
     llm,
     loomloom,
@@ -66,17 +67,25 @@ from app.services import version_checker
 from app.utils.logging_utils import configure_terminal_logger
 from app.utils import utils
 
+try:
+    webui_task.recover_interrupted_webui_tasks()
+except Exception as exc:
+    # Streamlit reruns after transient Redis failures. The recovery helper does
+    # not commit its one-shot guard until a successful scan, so a later rerun
+    # can retry without preventing the UI from opening for diagnostics.
+    logger.exception(f"WebUI startup task recovery failed: {exc}")
+
 st.set_page_config(
-    page_title="MoneyPrinterTurbo",
+    page_title="MoneyPrinterTurbo RU",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="auto",
     menu_items={
-        "Report a bug": "https://github.com/harry0703/MoneyPrinterTurbo/issues",
-        "About": "# MoneyPrinterTurbo\nSimply provide a topic or keyword for a video, and it will "
-        "automatically generate the video copy, video materials, video subtitles, "
-        "and video background music before synthesizing a high-definition short "
-        "video.\n\nhttps://github.com/harry0703/MoneyPrinterTurbo",
+        "Report a bug": "https://github.com/tornado909/MoneyPrinterTurbo/issues",
+        "About": "# MoneyPrinterTurbo RU\nРусскоязычная редакция MoneyPrinterTurbo: "
+        "сценарий, материалы, озвучка, субтитры, музыка и сборка короткого видео. "
+        "Основано на harry0703/MoneyPrinterTurbo.\n\n"
+        "https://github.com/tornado909/MoneyPrinterTurbo",
     },
 )
 
@@ -97,8 +106,8 @@ config_file = os.path.join(root_dir, "webui", ".streamlit", "webui.toml")
 # 项目真正支持的语言；自动识别结果只进入当前会话，不修改全局配置。
 locales = utils.load_locales(i18n_dir)
 DEFAULT_CHATTERBOX_BASE_URL = "http://127.0.0.1:4123/v1"
-DEFAULT_CHATTERBOX_MODEL = "chatterbox"
-DEFAULT_CHATTERBOX_VOICES = ["default-Female"]
+DEFAULT_CHATTERBOX_MODEL = "tts-1"
+DEFAULT_CHATTERBOX_VOICES = ["ru-default"]
 DEFAULT_KOKORO_BASE_URL = "http://127.0.0.1:8880/v1"
 DEFAULT_KOKORO_MODEL = "kokoro"
 # empty = ask the server for its voice list (GET {base_url}/audio/voices)
@@ -126,6 +135,7 @@ LOOMLOOM_MAX_POLL_FAILURES = 5
 VIDEO_SOURCE_GROUPS = {
     "stock_video": ("pexels", "pixabay", "coverr"),
     "ai_video": (
+        "asc_ai",
         "metaso_minimax",
         "ofox",
         "loomloom",
@@ -628,6 +638,7 @@ def _initialize_session_state():
         saved_language=saved_ui_language,
         browser_locale=browser_locale,
         supported_languages=locales.keys(),
+        default_language="ru",
     )
 
     defaults = {
@@ -1669,13 +1680,13 @@ def _render_brand(available_update: str | None = None):
     st.markdown(
         f"""
         <h1 class="mpt-brand">
-            <span class="mpt-brand__name">MoneyPrinterTurbo</span>
+            <span class="mpt-brand__name">MoneyPrinterTurbo RU</span>
             <a class="mpt-brand__version"
-               href="https://github.com/harry0703/MoneyPrinterTurbo"
+               href="https://github.com/tornado909/MoneyPrinterTurbo"
                target="_blank"
                rel="noopener noreferrer"
-               aria-label="Open MoneyPrinterTurbo on GitHub"
-               title="Open project on GitHub">v{html.escape(str(config.project_version))}</a>
+               aria-label="Open MoneyPrinterTurbo RU on GitHub"
+               title="Open RU edition on GitHub">v{html.escape(str(config.project_version))}</a>
             {update_link}
         </h1>
         """,
@@ -1790,6 +1801,16 @@ support_locales = [
 # -----------------------------------------------------------------------------
 # 通用 UI 组件、资源缓存与日志
 # -----------------------------------------------------------------------------
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_asc_ai_character_ids():
+    return asc_ai.list_characters()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_asc_ai_character_identity(character_id: str):
+    return asc_ai.get_character_identity(character_id)
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -3247,744 +3268,860 @@ def _render_settings_dialog():
         # 中间面板 - LLM 设置
 
         with middle_config_panel:
-            # 下拉顺序、默认 label 和稳定 provider id 全部来自 Registry；locale
-            # 只覆盖展示文案，不再让 Main.py 维护第二份 Provider 列表。
-            llm_provider_ids = [
-                provider.provider_id for provider in LLM_PROVIDER_REGISTRY
-            ]
-            llm_provider_labels = {
-                provider.provider_id: get_llm_provider_label(provider)
-                for provider in LLM_PROVIDER_REGISTRY
-            }
-            saved_llm_provider = config.app.get(
-                "llm_provider", DEFAULT_LLM_PROVIDER_ID
-            ).lower()
-            if saved_llm_provider not in llm_provider_ids:
-                saved_llm_provider = DEFAULT_LLM_PROVIDER_ID
-
-            llm_provider = stable_selectbox(
-                tr("LLM Provider"),
-                options=llm_provider_ids,
-                default_value=saved_llm_provider,
-                key="llm_provider_select",
-                format_func=lambda provider_id: llm_provider_labels[provider_id],
-            )
-            # 配置表单和 Provider 说明并排展示，减少长说明在窄列中的换行，
-            # 同时充分利用基础设置面板的横向空间。
-            llm_form_panel, llm_help_panel = st.columns(
-                [0.9, 1.1],
-                gap="large",
-                vertical_alignment="top",
-            )
-            llm_helper = llm_help_panel.container()
-            _set_runtime_config("app", "llm_provider", llm_provider)
-            llm_provider_spec = get_llm_provider(llm_provider)
-            if llm_provider_spec is None:
-                # 正常情况下下拉选项全部来自 Registry，不会进入该分支；保留
-                # 明确错误用于诊断损坏的 session state 或后续接入遗漏。
-                raise RuntimeError(f"unsupported llm provider: {llm_provider}")
-
-            llm_api_key = config.app.get(llm_provider_spec.config_key("api_key"), "")
-            configured_llm_base_url = config.app.get(
-                llm_provider_spec.config_key("base_url"), ""
-            )
-            llm_default_base_url = llm_provider_spec.effective_default_base_url
-            llm_base_url = configured_llm_base_url or llm_default_base_url
-            llm_model_name = llm_provider_spec.resolve_model_name(
-                config.app.get(llm_provider_spec.config_key("model_name"), "")
-            )
-
-            provider_tip_context = {}
-            selected_service_endpoint = None
-            if llm_provider_spec.service_endpoints:
-                # Kimi 等 Provider 的中国站和国际站使用不同账号体系。只让用户
-                # 选择服务区域，再由 Registry 同步 API 申请入口和 Base URL，
-                # 避免手工组合错误。已有空 Base URL 配置继续沿用中国站，只有
-                # 尚未填写 Key 的全新配置才根据界面语言推荐对应入口。
-                selected_service_endpoint = (
-                    llm_provider_spec.select_service_endpoint(
-                        configured_llm_base_url,
-                        has_api_key=bool(str(llm_api_key).strip()),
-                        prefer_international=(
-                            st.session_state.get("ui_language", "en") != "zh"
-                        ),
+            if asc_ai.local_only():
+                st.markdown(f"#### {tr('Local AI Runtime')}")
+                st.info(tr("Local AI Runtime Help"))
+                local_model = str(
+                    config.asc_ai.get(
+                        "director_model_name",
+                        "Qwen3-8B-Q4_K_M.gguf",
                     )
+                    or "Qwen3-8B-Q4_K_M.gguf"
                 )
-                endpoint_options = [
-                    endpoint.endpoint_id
-                    for endpoint in llm_provider_spec.service_endpoints
-                ] + [CUSTOM_LLM_ENDPOINT_ID]
-                default_endpoint_id = (
-                    selected_service_endpoint.endpoint_id
-                    if selected_service_endpoint
-                    else CUSTOM_LLM_ENDPOINT_ID
-                )
-                endpoint_labels = {
-                    endpoint.endpoint_id: (
-                        tr_optional(
-                            llm_provider_spec.endpoint_label_key(endpoint.endpoint_id),
-                            fallback_language="en",
+                local_llm_url = (
+                    os.getenv("ASC_AI_PROMPT_LLM_URL")
+                    or str(
+                        config.asc_ai.get(
+                            "prompt_llm_url",
+                            "http://127.0.0.1:8080",
                         )
-                        or endpoint.default_label
                     )
-                    for endpoint in llm_provider_spec.service_endpoints
+                ).rstrip("/")
+                local_scheduler_url = (
+                    os.getenv("ASC_AI_SCHEDULER_URL")
+                    or str(
+                        config.asc_ai.get(
+                            "scheduler_url",
+                            "http://127.0.0.1:8090",
+                        )
+                    )
+                ).rstrip("/")
+                runtime_model_col, runtime_url_col = st.columns(2)
+                with runtime_model_col:
+                    st.text_input(
+                        tr("Model Name"),
+                        value=local_model,
+                        key="asc_ai_local_llm_model_display",
+                        disabled=True,
+                    )
+                with runtime_url_col:
+                    st.text_input(
+                        tr("Base Url"),
+                        value=local_llm_url,
+                        key="asc_ai_local_llm_url_display",
+                        disabled=True,
+                    )
+                st.caption(
+                    tr("Local AI Scheduler Help").format(
+                        scheduler=local_scheduler_url
+                    )
+                )
+                if st.button(
+                    tr("Test LLM Connection"),
+                    key="test_asc_ai_local_llm_button",
+                    use_container_width=True,
+                    type="secondary",
+                    icon=":material/network_check:",
+                ):
+                    try:
+                        local_health = asc_ai.health(stop_at="script")
+                        st.success(tr("ASC-AI Ready"))
+                        st.json(local_health, expanded=False)
+                    except asc_ai.AscAIError as exc:
+                        st.error(
+                            tr("ASC-AI Unavailable").format(error=str(exc))
+                        )
+            else:
+                # 下拉顺序、默认 label 和稳定 provider id 全部来自 Registry；locale
+                # 只覆盖展示文案，不再让 Main.py 维护第二份 Provider 列表。
+                llm_provider_ids = [
+                    provider.provider_id for provider in LLM_PROVIDER_REGISTRY
+                ]
+                llm_provider_labels = {
+                    provider.provider_id: get_llm_provider_label(provider)
+                    for provider in LLM_PROVIDER_REGISTRY
                 }
-                endpoint_labels[CUSTOM_LLM_ENDPOINT_ID] = (
-                    tr_optional("Custom API Endpoint", fallback_language="en")
-                    or "Custom API Endpoint"
+                saved_llm_provider = config.app.get(
+                    "llm_provider", DEFAULT_LLM_PROVIDER_ID
+                ).lower()
+                if saved_llm_provider not in llm_provider_ids:
+                    saved_llm_provider = DEFAULT_LLM_PROVIDER_ID
+
+                llm_provider = stable_selectbox(
+                    tr("LLM Provider"),
+                    options=llm_provider_ids,
+                    default_value=saved_llm_provider,
+                    key="llm_provider_select",
+                    format_func=lambda provider_id: llm_provider_labels[provider_id],
                 )
-                with llm_form_panel:
-                    selected_endpoint_id = stable_selectbox(
-                        tr_optional(
-                            llm_provider_spec.endpoint_selector_label_key,
-                            fallback_language="en",
+                # 配置表单和 Provider 说明并排展示，减少长说明在窄列中的换行，
+                # 同时充分利用基础设置面板的横向空间。
+                llm_form_panel, llm_help_panel = st.columns(
+                    [0.9, 1.1],
+                    gap="large",
+                    vertical_alignment="top",
+                )
+                llm_helper = llm_help_panel.container()
+                _set_runtime_config("app", "llm_provider", llm_provider)
+                llm_provider_spec = get_llm_provider(llm_provider)
+                if llm_provider_spec is None:
+                    # 正常情况下下拉选项全部来自 Registry，不会进入该分支；保留
+                    # 明确错误用于诊断损坏的 session state 或后续接入遗漏。
+                    raise RuntimeError(f"unsupported llm provider: {llm_provider}")
+
+                llm_api_key = config.app.get(llm_provider_spec.config_key("api_key"), "")
+                configured_llm_base_url = config.app.get(
+                    llm_provider_spec.config_key("base_url"), ""
+                )
+                llm_default_base_url = llm_provider_spec.effective_default_base_url
+                llm_base_url = configured_llm_base_url or llm_default_base_url
+                llm_model_name = llm_provider_spec.resolve_model_name(
+                    config.app.get(llm_provider_spec.config_key("model_name"), "")
+                )
+
+                provider_tip_context = {}
+                selected_service_endpoint = None
+                if llm_provider_spec.service_endpoints:
+                    # Kimi 等 Provider 的中国站和国际站使用不同账号体系。只让用户
+                    # 选择服务区域，再由 Registry 同步 API 申请入口和 Base URL，
+                    # 避免手工组合错误。已有空 Base URL 配置继续沿用中国站，只有
+                    # 尚未填写 Key 的全新配置才根据界面语言推荐对应入口。
+                    selected_service_endpoint = (
+                        llm_provider_spec.select_service_endpoint(
+                            configured_llm_base_url,
+                            has_api_key=bool(str(llm_api_key).strip()),
+                            prefer_international=(
+                                st.session_state.get("ui_language", "en") != "zh"
+                            ),
                         )
-                        or tr("API Platform"),
-                        options=endpoint_options,
-                        default_value=default_endpoint_id,
-                        key=f"{llm_provider}_service_endpoint_select",
-                        format_func=lambda endpoint_id: endpoint_labels[endpoint_id],
-                        help=(
+                    )
+                    endpoint_options = [
+                        endpoint.endpoint_id
+                        for endpoint in llm_provider_spec.service_endpoints
+                    ] + [CUSTOM_LLM_ENDPOINT_ID]
+                    default_endpoint_id = (
+                        selected_service_endpoint.endpoint_id
+                        if selected_service_endpoint
+                        else CUSTOM_LLM_ENDPOINT_ID
+                    )
+                    endpoint_labels = {
+                        endpoint.endpoint_id: (
                             tr_optional(
-                                llm_provider_spec.endpoint_selector_help_key,
+                                llm_provider_spec.endpoint_label_key(endpoint.endpoint_id),
                                 fallback_language="en",
                             )
-                            or None
-                        ),
-                    )
-                selected_service_endpoint = next(
-                    (
-                        endpoint
+                            or endpoint.default_label
+                        )
                         for endpoint in llm_provider_spec.service_endpoints
-                        if endpoint.endpoint_id == selected_endpoint_id
-                    ),
-                    None,
-                )
-                if selected_service_endpoint:
-                    llm_base_url = selected_service_endpoint.base_url
-                    provider_tip_context.update(
-                        {
-                            "api_key_url": selected_service_endpoint.api_key_url,
-                            "default_base_url": selected_service_endpoint.base_url,
-                            "model_docs_url": selected_service_endpoint.model_docs_url,
-                        }
+                    }
+                    endpoint_labels[CUSTOM_LLM_ENDPOINT_ID] = (
+                        tr_optional("Custom API Endpoint", fallback_language="en")
+                        or "Custom API Endpoint"
                     )
-                else:
-                    # 自定义模式只保留用户明确保存的地址，不将某个标准区域伪装
-                    # 成自定义值。输入为空时配置不会持久化，下一次仍回到兼容默认。
-                    llm_base_url = str(configured_llm_base_url or "").strip()
-
-            if llm_provider == "ollama":
-                llm_default_base_url = config.get_default_ollama_base_url()
-                if not llm_base_url:
-                    llm_base_url = llm_default_base_url
-                docker_hint = ""
-                if config.is_running_in_container():
-                    docker_hint = tr_optional(
-                        "llm_provider_tips.ollama.docker_hint",
-                        fallback_language="en",
+                    with llm_form_panel:
+                        selected_endpoint_id = stable_selectbox(
+                            tr_optional(
+                                llm_provider_spec.endpoint_selector_label_key,
+                                fallback_language="en",
+                            )
+                            or tr("API Platform"),
+                            options=endpoint_options,
+                            default_value=default_endpoint_id,
+                            key=f"{llm_provider}_service_endpoint_select",
+                            format_func=lambda endpoint_id: endpoint_labels[endpoint_id],
+                            help=(
+                                tr_optional(
+                                    llm_provider_spec.endpoint_selector_help_key,
+                                    fallback_language="en",
+                                )
+                                or None
+                            ),
+                        )
+                    selected_service_endpoint = next(
+                        (
+                            endpoint
+                            for endpoint in llm_provider_spec.service_endpoints
+                            if endpoint.endpoint_id == selected_endpoint_id
+                        ),
+                        None,
                     )
-                provider_tip_context["docker_hint"] = docker_hint
+                    if selected_service_endpoint:
+                        llm_base_url = selected_service_endpoint.base_url
+                        provider_tip_context.update(
+                            {
+                                "api_key_url": selected_service_endpoint.api_key_url,
+                                "default_base_url": selected_service_endpoint.base_url,
+                                "model_docs_url": selected_service_endpoint.model_docs_url,
+                            }
+                        )
+                    else:
+                        # 自定义模式只保留用户明确保存的地址，不将某个标准区域伪装
+                        # 成自定义值。输入为空时配置不会持久化，下一次仍回到兼容默认。
+                        llm_base_url = str(configured_llm_base_url or "").strip()
 
-            tips = get_llm_provider_tips(llm_provider, **provider_tip_context)
-            if tips:
-                with llm_helper:
-                    st.info(tips)
+                if llm_provider == "ollama":
+                    llm_default_base_url = config.get_default_ollama_base_url()
+                    if not llm_base_url:
+                        llm_base_url = llm_default_base_url
+                    docker_hint = ""
+                    if config.is_running_in_container():
+                        docker_hint = tr_optional(
+                            "llm_provider_tips.ollama.docker_hint",
+                            fallback_language="en",
+                        )
+                    provider_tip_context["docker_hint"] = docker_hint
 
-            st_llm_api_key = llm_api_key
-            if llm_provider_spec.show_api_key:
-                st_llm_api_key = llm_form_panel.text_input(
-                    tr("API Key"),
-                    value=llm_api_key,
-                    type="password",
-                    key=f"{llm_provider}_api_key_input",
-                )
+                tips = get_llm_provider_tips(llm_provider, **provider_tip_context)
+                if tips:
+                    with llm_helper:
+                        st.info(tips)
 
-            st_llm_base_url = llm_base_url
-            if llm_provider_spec.show_base_url:
-                st_llm_base_url = llm_form_panel.text_input(
-                    tr("Base Url"),
-                    value=llm_base_url,
-                    key=(
-                        f"{llm_provider}_base_url_"
-                        f"{selected_service_endpoint.endpoint_id}_input"
-                        if selected_service_endpoint
-                        else f"{llm_provider}_base_url_custom_input"
-                    ),
-                    disabled=selected_service_endpoint is not None,
-                )
-            st_llm_model_name = ""
-            if llm_provider == "groq":
-                effective_api_key = st_llm_api_key or llm_api_key
-                effective_base_url = st_llm_base_url or llm_base_url
-                groq_models = get_groq_model_ids(
-                    api_key=effective_api_key,
-                    base_url=effective_base_url,
-                )
-
-                if groq_models:
-                    selected_index = 0
-                    if llm_model_name in groq_models:
-                        selected_index = groq_models.index(llm_model_name)
-
-                    st_llm_model_name = llm_form_panel.selectbox(
-                        tr("Model Name"),
-                        options=groq_models,
-                        index=selected_index,
-                        key="groq_model_name_select",
+                st_llm_api_key = llm_api_key
+                if llm_provider_spec.show_api_key:
+                    st_llm_api_key = llm_form_panel.text_input(
+                        tr("API Key"),
+                        value=llm_api_key,
+                        type="password",
+                        key=f"{llm_provider}_api_key_input",
                     )
+
+                st_llm_base_url = llm_base_url
+                if llm_provider_spec.show_base_url:
+                    st_llm_base_url = llm_form_panel.text_input(
+                        tr("Base Url"),
+                        value=llm_base_url,
+                        key=(
+                            f"{llm_provider}_base_url_"
+                            f"{selected_service_endpoint.endpoint_id}_input"
+                            if selected_service_endpoint
+                            else f"{llm_provider}_base_url_custom_input"
+                        ),
+                        disabled=selected_service_endpoint is not None,
+                    )
+                st_llm_model_name = ""
+                if llm_provider == "groq":
+                    effective_api_key = st_llm_api_key or llm_api_key
+                    effective_base_url = st_llm_base_url or llm_base_url
+                    groq_models = get_groq_model_ids(
+                        api_key=effective_api_key,
+                        base_url=effective_base_url,
+                    )
+
+                    if groq_models:
+                        selected_index = 0
+                        if llm_model_name in groq_models:
+                            selected_index = groq_models.index(llm_model_name)
+
+                        st_llm_model_name = llm_form_panel.selectbox(
+                            tr("Model Name"),
+                            options=groq_models,
+                            index=selected_index,
+                            key="groq_model_name_select",
+                        )
+                    else:
+                        st_llm_model_name = llm_form_panel.text_input(
+                            tr("Model Name"),
+                            value=llm_model_name,
+                            key="groq_model_name_input",
+                        )
+                        if effective_api_key:
+                            llm_form_panel.caption(tr("Groq Model List Load Failed"))
+                        else:
+                            llm_form_panel.caption(
+                                tr("Groq API Key Required for Model List")
+                            )
                 else:
                     st_llm_model_name = llm_form_panel.text_input(
                         tr("Model Name"),
                         value=llm_model_name,
-                        key="groq_model_name_input",
+                        key=f"{llm_provider}_model_name_input",
                     )
-                    if effective_api_key:
-                        llm_form_panel.caption(tr("Groq Model List Load Failed"))
-                    else:
-                        llm_form_panel.caption(
-                            tr("Groq API Key Required for Model List")
-                        )
-            else:
-                st_llm_model_name = llm_form_panel.text_input(
-                    tr("Model Name"),
-                    value=llm_model_name,
-                    key=f"{llm_provider}_model_name_input",
-                )
-            # 输入框展示 Registry 默认值，但配置只保存真实的用户覆盖值。
-            # 这样默认模型、Base URL 更新后，未自定义的用户能够自动跟随。
-            _set_runtime_config(
-                "app",
-                llm_provider_spec.config_key("api_key"),
-                st_llm_api_key,
-            )
-            _set_runtime_config(
-                "app",
-                llm_provider_spec.config_key("base_url"),
-                normalize_provider_override(
-                    st_llm_base_url,
-                    llm_default_base_url,
-                ),
-            )
-            _set_runtime_config(
-                "app",
-                llm_provider_spec.config_key("model_name"),
-                normalize_provider_override(
-                    st_llm_model_name,
-                    llm_provider_spec.default_model,
-                ),
-            )
-
-            # Provider 专用字段也由 Registry 声明。例如 Cloudflare AI Gateway
-            # 需要 Account ID；以后新增类似字段时无需再在 Main.py 增加判断。
-            for field in llm_provider_spec.extra_fields:
-                field_config_key = llm_provider_spec.config_key(field.config_suffix)
-                field_value = llm_form_panel.text_input(
-                    tr(field.label_key),
-                    value=(config.app.get(field_config_key, "") or field.default_value),
-                    type="password" if field.secret else "default",
-                    key=f"{llm_provider}_{field.config_suffix}_input",
+                # 输入框展示 Registry 默认值，但配置只保存真实的用户覆盖值。
+                # 这样默认模型、Base URL 更新后，未自定义的用户能够自动跟随。
+                _set_runtime_config(
+                    "app",
+                    llm_provider_spec.config_key("api_key"),
+                    st_llm_api_key,
                 )
                 _set_runtime_config(
                     "app",
-                    field_config_key,
+                    llm_provider_spec.config_key("base_url"),
                     normalize_provider_override(
-                        field_value,
-                        field.default_value,
-                    ),
-                )
-
-            if llm_form_panel.button(
-                tr("Test LLM Connection"),
-                key="test_llm_connection_button",
-                use_container_width=True,
-                type="secondary",
-                icon=":material/network_check:",
-            ):
-                with config.try_runtime_config_lock() as lock_acquired:
-                    if not lock_acquired:
-                        llm_form_panel.warning(tr("Runtime Configuration Busy"))
-                    else:
-                        with llm_form_panel.spinner(tr("Testing LLM Connection")):
-                            connection_ok, connection_error, connection_elapsed = (
-                                llm.test_connection()
-                            )
-
-                if not lock_acquired:
-                    connection_ok = None
-                elif connection_ok:
-                    llm_form_panel.success(
-                        tr("LLM Connection Test Succeeded").format(
-                            provider=llm_provider_labels[llm_provider],
-                            model=st_llm_model_name or "-",
-                            elapsed=f"{connection_elapsed:.2f}",
-                        )
-                    )
-                else:
-                    connection_error = format_llm_connection_error(
-                        llm_provider,
                         st_llm_base_url,
-                        connection_error,
-                    )
-                    llm_form_panel.error(
-                        tr("LLM Connection Test Failed").format(error=connection_error)
-                    )
-
-        # 右侧面板 - API 密钥设置
-        with right_config_panel:
-            # 素材 Provider 按「搜索库存素材 / AI 生成视频 / AI 生成图片」
-            # 分组，避免随着 Provider 增多后所有字段在一个长列表中混排。
-            # 分组只调整展示层级，不改动已有配置键，旧用户升级后
-            # 会继续读取原有 config.toml 值。
-            with st.container(border=True):
-                st.markdown(f"#### {tr('Stock Video APIs')}")
-                st.caption(tr("Stock Video APIs Help"))
-
-                pexels_api_key = _get_material_api_keys("pexels_api_keys")
-                pixabay_api_key = _get_material_api_keys("pixabay_api_keys")
-                coverr_api_key = _get_material_api_keys("coverr_api_keys")
-                pexels_api_key = st.text_input(
-                    tr("Pexels API Key"),
-                    value=pexels_api_key,
-                    type="password",
-                    key="pexels_api_keys_input",
-                )
-                _save_material_api_keys("pexels_api_keys", pexels_api_key)
-
-                pixabay_api_key = st.text_input(
-                    tr("Pixabay API Key"),
-                    value=pixabay_api_key,
-                    type="password",
-                    key="pixabay_api_keys_input",
-                )
-                _save_material_api_keys("pixabay_api_keys", pixabay_api_key)
-
-                coverr_api_key = st.text_input(
-                    tr("Coverr API Key"),
-                    value=coverr_api_key,
-                    type="password",
-                    key="coverr_api_keys_input",
-                )
-                _save_material_api_keys("coverr_api_keys", coverr_api_key)
-
-            with st.container(border=True):
-                st.markdown(f"#### {tr('AI Video Generation APIs')}")
-                st.caption(tr("AI Video Generation APIs Help"))
-
-                # 视频生成 Provider 按赞助商优先展示，赞助商内部顺序
-                # 与 VIDEO_SOURCE_GROUPS 一致：秘塔、OFox、胜算云、火山引擎。
-                st.markdown(f"**{tr('Metaso MiniMax H3')}**")
-                metaso_api_key = st.text_input(
-                    tr("Metaso MiniMax API Key"),
-                    value=str(
-                        config.app.get("metaso_minimax_api_key", "") or ""
-                    ).strip(),
-                    type="password",
-                    help=tr("Metaso MiniMax API Key Help"),
-                    key="metaso_minimax_api_key_input",
-                )
-                _set_runtime_config(
-                    "app", "metaso_minimax_api_key", metaso_api_key.strip()
-                )
-                configured_metaso_base_url = str(
-                    config.app.get(
-                        "metaso_minimax_base_url",
-                        metaso_minimax.DEFAULT_BASE_URL,
-                    )
-                    or metaso_minimax.DEFAULT_BASE_URL
-                ).strip()
-                metaso_base_url = st.text_input(
-                    tr("Metaso MiniMax Base URL"),
-                    value=(
-                        ""
-                        if configured_metaso_base_url == metaso_minimax.DEFAULT_BASE_URL
-                        else configured_metaso_base_url
+                        llm_default_base_url,
                     ),
-                    placeholder=metaso_minimax.DEFAULT_BASE_URL,
-                    key="metaso_minimax_base_url_input",
                 )
                 _set_runtime_config(
                     "app",
-                    "metaso_minimax_base_url",
-                    metaso_base_url.strip() or metaso_minimax.DEFAULT_BASE_URL,
-                )
-                configured_metaso_resolution = (
-                    str(
-                        config.app.get(
-                            "metaso_minimax_resolution",
-                            metaso_minimax.DEFAULT_RESOLUTION,
-                        )
-                    )
-                    .strip()
-                    .upper()
-                )
-                metaso_resolution_options = sorted(
-                    metaso_minimax.SUPPORTED_RESOLUTIONS,
-                    key=lambda value: value != metaso_minimax.DEFAULT_RESOLUTION,
-                )
-                resolution_is_valid = (
-                    configured_metaso_resolution
-                    in metaso_minimax.SUPPORTED_RESOLUTIONS
-                )
-                if not resolution_is_valid:
-                    # 分辨率直接影响计费。手工配置错误时保留原值并要求用户
-                    # 主动选择，不能在打开设置弹窗时静默改成价格更高的 2K。
-                    st.error(
-                        tr("Metaso MiniMax Invalid Resolution").format(
-                            value=configured_metaso_resolution,
-                            supported=", ".join(metaso_resolution_options),
-                        )
-                    )
-                metaso_resolution = st.selectbox(
-                    tr("Metaso MiniMax Resolution"),
-                    options=metaso_resolution_options,
-                    index=(
-                        metaso_resolution_options.index(configured_metaso_resolution)
-                        if resolution_is_valid
-                        else None
+                    llm_provider_spec.config_key("model_name"),
+                    normalize_provider_override(
+                        st_llm_model_name,
+                        llm_provider_spec.default_model,
                     ),
-                    key="metaso_minimax_resolution_input",
-                    help=tr("Metaso MiniMax Resolution Help"),
-                    placeholder=tr("Select Metaso MiniMax Resolution"),
-                )
-                if metaso_resolution is not None:
-                    _set_runtime_config(
-                        "app", "metaso_minimax_resolution", metaso_resolution
-                    )
-
-                st.divider()
-                st.markdown("**OfoxAI**")
-                st.caption(f"[OfoxAI]({OFOX_REFERRAL_URL}) · {tr('OFox AI Video Help')}")
-                ofox_api_key = st.text_input(
-                    tr("OFox API Key"),
-                    value=str(config.app.get("ofox_api_key", "") or ""),
-                    type="password",
-                    key="ofox_api_key_input",
-                )
-                _set_runtime_config("app", "ofox_api_key", ofox_api_key.strip())
-                ofox_model = st.text_input(
-                    tr("OFox Text-to-Video Model"),
-                    value=str(
-                        config.app.get(
-                            "ofox_text_to_video_model",
-                            ofox.DEFAULT_MODEL_ID,
-                        )
-                        or ofox.DEFAULT_MODEL_ID
-                    ),
-                    key="ofox_text_to_video_model_input",
-                )
-                _set_runtime_config(
-                    "app", "ofox_text_to_video_model", ofox_model.strip()
-                )
-                configured_ofox_base_url = str(
-                    config.app.get("ofox_base_url", ofox.DEFAULT_BASE_URL)
-                    or ofox.DEFAULT_BASE_URL
-                ).strip()
-                ofox_base_url = st.text_input(
-                    tr("OFox Base URL"),
-                    value=(
-                        ""
-                        if configured_ofox_base_url == ofox.DEFAULT_BASE_URL
-                        else configured_ofox_base_url
-                    ),
-                    placeholder=ofox.DEFAULT_BASE_URL,
-                    key="ofox_base_url_input",
-                )
-                _set_runtime_config(
-                    "app",
-                    "ofox_base_url",
-                    ofox_base_url.strip() or ofox.DEFAULT_BASE_URL,
-                )
-                ofox_vendor_options = [
-                    (tr("OFox Vendor BytePlus"), "byteplus"),
-                    (tr("OFox Vendor Volcengine"), "volcengine"),
-                    (tr("OFox Vendor Auto"), ""),
-                ]
-                configured_ofox_vendor = str(
-                    config.app.get("ofox_provider", ofox.DEFAULT_PROVIDER_TYPE)
-                    or ""
-                ).strip()
-                if configured_ofox_vendor not in {
-                    value for _, value in ofox_vendor_options
-                }:
-                    # 用户在 config.toml 手工钉定了其它厂商名时保留该选择，
-                    # 避免打开设置页就被下拉框覆盖回默认值。
-                    ofox_vendor_options.append(
-                        (configured_ofox_vendor, configured_ofox_vendor)
-                    )
-                selected_ofox_vendor = stable_selectbox(
-                    tr("OFox Upstream Vendor"),
-                    options=[value for _, value in ofox_vendor_options],
-                    default_value=configured_ofox_vendor,
-                    key="ofox_provider_select",
-                    format_func=lambda value: dict(
-                        (v, label) for label, v in ofox_vendor_options
-                    )[value],
-                    help=tr("OFox Upstream Vendor Help"),
-                )
-                _set_runtime_config("app", "ofox_provider", selected_ofox_vendor)
-
-                st.divider()
-                st.markdown(f"**{tr('Shengsuan Cloud AI Video')}**")
-                app_config_snapshot = config.snapshot_config_with_pending(config.app)
-                if (
-                    str(app_config_snapshot.get("llm_provider", "") or "").lower()
-                    == "shengsuanyun"
-                ):
-                    # 大模型 Provider 已选胜算云时，视频生成直接复用
-                    # 同一密钥，不再展示一个容易引起歧义的独立输入框。
-                    st.caption(tr("Shengsuan Cloud API Key Reused"))
-                else:
-                    configured_loomloom_token = str(
-                        app_config_snapshot.get("loomloom_api_token", "") or ""
-                    ).strip()
-                    loomloom_api_token = st.text_input(
-                        tr("Shengsuan Cloud API Key"),
-                        value=configured_loomloom_token,
-                        type="password",
-                        key="loomloom_api_token_input",
-                        help=tr("Shengsuan Cloud API Key Help"),
-                        placeholder=tr("Shengsuan Cloud API Key Placeholder"),
-                    ).strip()
-                    _set_runtime_config(
-                        "app", "loomloom_api_token", loomloom_api_token
-                    )
-
-                st.divider()
-                seedance_api_key_value = str(
-                    config.app.get("volcengine_seedance_api_key", "") or ""
-                ).strip()
-                shared_ark_api_key = str(
-                    config.app.get("volcengine_api_key", "") or ""
-                ).strip()
-                environment_ark_api_key = os.getenv(
-                    "VOLCENGINE_ARK_API_KEY", ""
-                ).strip()
-                seedance_reuses_llm_key = bool(
-                    not seedance_api_key_value
-                    and not environment_ark_api_key
-                    and shared_ark_api_key
-                )
-                seedance_title = f"**{tr('Volcano Engine Seedance')}**"
-                if seedance_reuses_llm_key:
-                    # 只有复用大模型密钥无法从当前输入框直接看出，保留该提示
-                    # 可以避免用户误以为必须重复填写；普通配置状态不再赘述。
-                    seedance_title += f" :blue[{tr('Reusing LLM API Key')}]"
-                st.markdown(seedance_title)
-                seedance_api_key = st.text_input(
-                    tr("Volcano Engine Ark API Key"),
-                    value=seedance_api_key_value,
-                    type="password",
-                    help=tr("Volcano Engine Ark API Key Help"),
-                    key="volcengine_seedance_api_key_input",
-                )
-                _set_runtime_config(
-                    "app", "volcengine_seedance_api_key", seedance_api_key.strip()
-                )
-                configured_seedance_model = str(
-                    config.app.get(
-                        "volcengine_seedance_model",
-                        volcengine_seedance.DEFAULT_MODEL_ID,
-                    )
-                    or volcengine_seedance.DEFAULT_MODEL_ID
-                ).strip()
-                seedance_model = st.text_input(
-                    tr("Volcano Engine Seedance Model"),
-                    # 内置默认值通过 placeholder 展示，用户自定义的
-                    # 模型或接入点 ID 仍作为真实值展示和保存。
-                    value=(
-                        ""
-                        if configured_seedance_model
-                        == volcengine_seedance.DEFAULT_MODEL_ID
-                        else configured_seedance_model
-                    ),
-                    placeholder=volcengine_seedance.DEFAULT_MODEL_ID,
-                    key="volcengine_seedance_model_input",
-                )
-                _set_runtime_config(
-                    "app",
-                    "volcengine_seedance_model",
-                    seedance_model.strip() or volcengine_seedance.DEFAULT_MODEL_ID,
-                )
-                configured_seedance_base_url = str(
-                    config.app.get(
-                        "volcengine_seedance_base_url",
-                        volcengine_seedance.DEFAULT_BASE_URL,
-                    )
-                    or volcengine_seedance.DEFAULT_BASE_URL
-                ).strip()
-                seedance_base_url = st.text_input(
-                    tr("Volcano Engine Ark Base URL"),
-                    value=(
-                        ""
-                        if configured_seedance_base_url
-                        == volcengine_seedance.DEFAULT_BASE_URL
-                        else configured_seedance_base_url
-                    ),
-                    placeholder=volcengine_seedance.DEFAULT_BASE_URL,
-                    key="volcengine_seedance_base_url_input",
-                )
-                _set_runtime_config(
-                    "app",
-                    "volcengine_seedance_base_url",
-                    seedance_base_url.strip() or volcengine_seedance.DEFAULT_BASE_URL,
                 )
 
-                st.divider()
-                wavespeed_api_key = _get_material_api_keys("wavespeed_api_keys")
-                st.markdown("**WaveSpeed**")
-                wavespeed_api_key = st.text_input(
-                    tr("WaveSpeed API Key"),
-                    value=wavespeed_api_key,
-                    type="password",
-                    key="wavespeed_api_keys_input",
-                )
-                _save_material_api_keys("wavespeed_api_keys", wavespeed_api_key)
-
-                st.divider()
-                st.markdown(f"**{tr('MuAPI AI Video')}**")
-                st.caption(tr("MuAPI AI Video Help"))
-                muapi_api_key = st.text_input(
-                    tr("MuAPI API Key"),
-                    value=str(config.app.get("muapi_api_key", "") or ""),
-                    type="password",
-                    help=tr("MuAPI API Key Help"),
-                    key="muapi_api_key_input",
-                )
-                _set_runtime_config("app", "muapi_api_key", muapi_api_key.strip())
-                configured_muapi_base_url = str(
-                    config.app.get("muapi_base_url", muapi.DEFAULT_BASE_URL)
-                    or muapi.DEFAULT_BASE_URL
-                ).strip()
-                muapi_base_url = st.text_input(
-                    tr("MuAPI Base URL"),
-                    value=(
-                        ""
-                        if configured_muapi_base_url == muapi.DEFAULT_BASE_URL
-                        else configured_muapi_base_url
-                    ),
-                    placeholder=muapi.DEFAULT_BASE_URL,
-                    key="muapi_base_url_input",
-                    help=tr("MuAPI Base URL Help"),
-                )
-                _set_runtime_config(
-                    "app",
-                    "muapi_base_url",
-                    muapi_base_url.strip() or muapi.DEFAULT_BASE_URL,
-                )
-                configured_muapi_endpoint = str(
-                    config.app.get("muapi_video_endpoint", muapi.DEFAULT_ENDPOINT)
-                    or muapi.DEFAULT_ENDPOINT
-                ).strip()
-                muapi_endpoint = st.text_input(
-                    tr("MuAPI Video Endpoint"),
-                    value=(
-                        ""
-                        if configured_muapi_endpoint == muapi.DEFAULT_ENDPOINT
-                        else configured_muapi_endpoint
-                    ),
-                    placeholder=muapi.DEFAULT_ENDPOINT,
-                    key="muapi_video_endpoint_input",
-                    help=tr("MuAPI Video Endpoint Help"),
-                )
-                _set_runtime_config(
-                    "app",
-                    "muapi_video_endpoint",
-                    muapi_endpoint.strip() or muapi.DEFAULT_ENDPOINT,
-                )
-                configured_muapi_resolution = str(
-                    config.app.get("muapi_resolution", muapi.DEFAULT_RESOLUTION)
-                    or muapi.DEFAULT_RESOLUTION
-                ).strip()
-                muapi_resolution = st.text_input(
-                    tr("MuAPI Resolution"),
-                    value=(
-                        ""
-                        if configured_muapi_resolution == muapi.DEFAULT_RESOLUTION
-                        else configured_muapi_resolution
-                    ),
-                    placeholder=muapi.DEFAULT_RESOLUTION,
-                    key="muapi_resolution_input",
-                    help=tr("MuAPI Resolution Help"),
-                )
-                _set_runtime_config(
-                    "app",
-                    "muapi_resolution",
-                    muapi_resolution.strip() or muapi.DEFAULT_RESOLUTION,
-                )
-
-
-            with st.container(border=True):
-                st.markdown(f"#### {tr('AI Image Generation APIs')}")
-                st.caption(tr("AI Image Generation APIs Help"))
-                st.markdown(f"**{tr('OpenAI Compatible Text-to-Image')}**")
-
-                openai_image_base_url = st.text_input(
-                    tr("OpenAI Image Base URL"),
-                    value=str(config.app.get("openai_image_base_url", "") or ""),
-                    placeholder="https://api.openai.com/v1",
-                    key="openai_image_base_url_input",
-                )
-                _set_runtime_config(
-                    "app", "openai_image_base_url", openai_image_base_url.strip()
-                )
-
-                openai_image_api_key = _get_material_api_keys(
-                    "openai_image_api_keys"
-                )
-                openai_image_api_key = st.text_input(
-                    tr("OpenAI Image API Key"),
-                    value=openai_image_api_key,
-                    type="password",
-                    help=tr("OpenAI Image API Key Help"),
-                    key="openai_image_api_keys_input",
-                )
-                _save_material_api_keys(
-                    "openai_image_api_keys", openai_image_api_key
-                )
-
-                openai_image_model = st.text_input(
-                    tr("OpenAI Image Model"),
-                    value=str(config.app.get("openai_image_model", "") or ""),
-                    placeholder="gpt-image-2",
-                    key="openai_image_model_input",
-                )
-                _set_runtime_config(
-                    "app", "openai_image_model", openai_image_model.strip()
-                )
-                # 只展示参考值，不将 OpenAI 官方端点写成默认配置。
-                # 兼容服务的 Base URL 和模型 ID 没有统一值；留空不会让
-                # 用户在未知情时误连官方付费接口，也不会覆盖旧配置。
-                st.caption(tr("OpenAI Image Configuration Example"))
-
-                with st.expander(
-                    tr("OpenAI Image Advanced Settings"), expanded=False
-                ):
-                    openai_image_size = st.text_input(
-                        tr("OpenAI Image Size"),
-                        value=str(config.app.get("openai_image_size", "") or ""),
-                        placeholder="1024x1536",
-                        help=tr("OpenAI Image Size Help"),
-                        key="openai_image_size_input",
-                    )
-                    _set_runtime_config(
-                        "app", "openai_image_size", openai_image_size.strip()
-                    )
-
-                    openai_image_prompt_template = st.text_input(
-                        tr("OpenAI Image Prompt Template"),
-                        value=str(
-                            config.app.get("openai_image_prompt_template", "") or ""
-                        ),
-                        placeholder="cinematic photo of {term}, photorealistic",
-                        help=tr("OpenAI Image Prompt Template Help"),
-                        key="openai_image_prompt_template_input",
+                # Provider 专用字段也由 Registry 声明。例如 Cloudflare AI Gateway
+                # 需要 Account ID；以后新增类似字段时无需再在 Main.py 增加判断。
+                for field in llm_provider_spec.extra_fields:
+                    field_config_key = llm_provider_spec.config_key(field.config_suffix)
+                    field_value = llm_form_panel.text_input(
+                        tr(field.label_key),
+                        value=(config.app.get(field_config_key, "") or field.default_value),
+                        type="password" if field.secret else "default",
+                        key=f"{llm_provider}_{field.config_suffix}_input",
                     )
                     _set_runtime_config(
                         "app",
-                        "openai_image_prompt_template",
-                        openai_image_prompt_template.strip(),
+                        field_config_key,
+                        normalize_provider_override(
+                            field_value,
+                            field.default_value,
+                        ),
                     )
+
+                if llm_form_panel.button(
+                    tr("Test LLM Connection"),
+                    key="test_llm_connection_button",
+                    use_container_width=True,
+                    type="secondary",
+                    icon=":material/network_check:",
+                ):
+                    with config.try_runtime_config_lock() as lock_acquired:
+                        if not lock_acquired:
+                            llm_form_panel.warning(tr("Runtime Configuration Busy"))
+                        else:
+                            with llm_form_panel.spinner(tr("Testing LLM Connection")):
+                                connection_ok, connection_error, connection_elapsed = (
+                                    llm.test_connection()
+                                )
+
+                    if not lock_acquired:
+                        connection_ok = None
+                    elif connection_ok:
+                        llm_form_panel.success(
+                            tr("LLM Connection Test Succeeded").format(
+                                provider=llm_provider_labels[llm_provider],
+                                model=st_llm_model_name or "-",
+                                elapsed=f"{connection_elapsed:.2f}",
+                            )
+                        )
+                    else:
+                        connection_error = format_llm_connection_error(
+                            llm_provider,
+                            st_llm_base_url,
+                            connection_error,
+                        )
+                        llm_form_panel.error(
+                            tr("LLM Connection Test Failed").format(error=connection_error)
+                        )
+
+
+        # 右侧面板 - API 密钥设置
+        with right_config_panel:
+            if asc_ai.local_only():
+                st.markdown(f"#### {tr('Local Production Stack')}")
+                st.success(tr("Cloud APIs Disabled"))
+                st.caption(tr("Local Production Stack Help"))
+                local_stack = {
+                    "GPU Scheduler": str(
+                        os.getenv("ASC_AI_SCHEDULER_URL")
+                        or config.asc_ai.get("scheduler_url", "http://127.0.0.1:8090")
+                    ),
+                    "Qwen3 Director": str(
+                        os.getenv("ASC_AI_PROMPT_LLM_URL")
+                        or config.asc_ai.get("prompt_llm_url", "http://127.0.0.1:8080")
+                    ),
+                    "Image Adapter": str(
+                        os.getenv("ASC_AI_IMAGE_ADAPTER_URL")
+                        or config.asc_ai.get("image_adapter_url", "http://127.0.0.1:8091")
+                    ),
+                    "Visual Analyzer": str(
+                        os.getenv("ASC_AI_VISUAL_ANALYZER_URL")
+                        or config.asc_ai.get("visual_analyzer_url", "http://127.0.0.1:8095")
+                    ),
+                    "Character Hub": str(
+                        os.getenv("ASC_AI_CHARACTER_HUB_URL")
+                        or config.asc_ai.get("character_hub_url", "http://127.0.0.1:8096")
+                    ),
+                    "Chatterbox": str(
+                        os.getenv("MPT_CHATTERBOX_BASE_URL")
+                        or config.chatterbox.get(
+                            "base_url",
+                            DEFAULT_CHATTERBOX_BASE_URL,
+                        )
+                    ),
+                }
+                for component, endpoint in local_stack.items():
+                    st.code(f"{component}: {endpoint}", language=None)
+                if st.button(
+                    tr("Check ASC-AI"),
+                    key="check_full_asc_ai_stack_button",
+                    use_container_width=True,
+                    icon=":material/health_and_safety:",
+                ):
+                    try:
+                        stack_health = asc_ai.health()
+                        st.success(tr("ASC-AI Ready"))
+                        st.json(stack_health, expanded=False)
+                    except asc_ai.AscAIError as exc:
+                        st.error(
+                            tr("ASC-AI Unavailable").format(error=str(exc))
+                        )
+            else:
+                # 素材 Provider 按「搜索库存素材 / AI 生成视频 / AI 生成图片」
+                # 分组，避免随着 Provider 增多后所有字段在一个长列表中混排。
+                # 分组只调整展示层级，不改动已有配置键，旧用户升级后
+                # 会继续读取原有 config.toml 值。
+                with st.container(border=True):
+                    st.markdown(f"#### {tr('Stock Video APIs')}")
+                    st.caption(tr("Stock Video APIs Help"))
+
+                    pexels_api_key = _get_material_api_keys("pexels_api_keys")
+                    pixabay_api_key = _get_material_api_keys("pixabay_api_keys")
+                    coverr_api_key = _get_material_api_keys("coverr_api_keys")
+                    pexels_api_key = st.text_input(
+                        tr("Pexels API Key"),
+                        value=pexels_api_key,
+                        type="password",
+                        key="pexels_api_keys_input",
+                    )
+                    _save_material_api_keys("pexels_api_keys", pexels_api_key)
+
+                    pixabay_api_key = st.text_input(
+                        tr("Pixabay API Key"),
+                        value=pixabay_api_key,
+                        type="password",
+                        key="pixabay_api_keys_input",
+                    )
+                    _save_material_api_keys("pixabay_api_keys", pixabay_api_key)
+
+                    coverr_api_key = st.text_input(
+                        tr("Coverr API Key"),
+                        value=coverr_api_key,
+                        type="password",
+                        key="coverr_api_keys_input",
+                    )
+                    _save_material_api_keys("coverr_api_keys", coverr_api_key)
+
+                with st.container(border=True):
+                    st.markdown(f"#### {tr('AI Video Generation APIs')}")
+                    st.caption(tr("AI Video Generation APIs Help"))
+
+                    # 视频生成 Provider 按赞助商优先展示，赞助商内部顺序
+                    # 与 VIDEO_SOURCE_GROUPS 一致：秘塔、OFox、胜算云、火山引擎。
+                    st.markdown(f"**{tr('Metaso MiniMax H3')}**")
+                    metaso_api_key = st.text_input(
+                        tr("Metaso MiniMax API Key"),
+                        value=str(
+                            config.app.get("metaso_minimax_api_key", "") or ""
+                        ).strip(),
+                        type="password",
+                        help=tr("Metaso MiniMax API Key Help"),
+                        key="metaso_minimax_api_key_input",
+                    )
+                    _set_runtime_config(
+                        "app", "metaso_minimax_api_key", metaso_api_key.strip()
+                    )
+                    configured_metaso_base_url = str(
+                        config.app.get(
+                            "metaso_minimax_base_url",
+                            metaso_minimax.DEFAULT_BASE_URL,
+                        )
+                        or metaso_minimax.DEFAULT_BASE_URL
+                    ).strip()
+                    metaso_base_url = st.text_input(
+                        tr("Metaso MiniMax Base URL"),
+                        value=(
+                            ""
+                            if configured_metaso_base_url == metaso_minimax.DEFAULT_BASE_URL
+                            else configured_metaso_base_url
+                        ),
+                        placeholder=metaso_minimax.DEFAULT_BASE_URL,
+                        key="metaso_minimax_base_url_input",
+                    )
+                    _set_runtime_config(
+                        "app",
+                        "metaso_minimax_base_url",
+                        metaso_base_url.strip() or metaso_minimax.DEFAULT_BASE_URL,
+                    )
+                    configured_metaso_resolution = (
+                        str(
+                            config.app.get(
+                                "metaso_minimax_resolution",
+                                metaso_minimax.DEFAULT_RESOLUTION,
+                            )
+                        )
+                        .strip()
+                        .upper()
+                    )
+                    metaso_resolution_options = sorted(
+                        metaso_minimax.SUPPORTED_RESOLUTIONS,
+                        key=lambda value: value != metaso_minimax.DEFAULT_RESOLUTION,
+                    )
+                    resolution_is_valid = (
+                        configured_metaso_resolution
+                        in metaso_minimax.SUPPORTED_RESOLUTIONS
+                    )
+                    if not resolution_is_valid:
+                        # 分辨率直接影响计费。手工配置错误时保留原值并要求用户
+                        # 主动选择，不能在打开设置弹窗时静默改成价格更高的 2K。
+                        st.error(
+                            tr("Metaso MiniMax Invalid Resolution").format(
+                                value=configured_metaso_resolution,
+                                supported=", ".join(metaso_resolution_options),
+                            )
+                        )
+                    metaso_resolution = st.selectbox(
+                        tr("Metaso MiniMax Resolution"),
+                        options=metaso_resolution_options,
+                        index=(
+                            metaso_resolution_options.index(configured_metaso_resolution)
+                            if resolution_is_valid
+                            else None
+                        ),
+                        key="metaso_minimax_resolution_input",
+                        help=tr("Metaso MiniMax Resolution Help"),
+                        placeholder=tr("Select Metaso MiniMax Resolution"),
+                    )
+                    if metaso_resolution is not None:
+                        _set_runtime_config(
+                            "app", "metaso_minimax_resolution", metaso_resolution
+                        )
+
+                    st.divider()
+                    st.markdown("**OfoxAI**")
+                    st.caption(f"[OfoxAI]({OFOX_REFERRAL_URL}) · {tr('OFox AI Video Help')}")
+                    ofox_api_key = st.text_input(
+                        tr("OFox API Key"),
+                        value=str(config.app.get("ofox_api_key", "") or ""),
+                        type="password",
+                        key="ofox_api_key_input",
+                    )
+                    _set_runtime_config("app", "ofox_api_key", ofox_api_key.strip())
+                    ofox_model = st.text_input(
+                        tr("OFox Text-to-Video Model"),
+                        value=str(
+                            config.app.get(
+                                "ofox_text_to_video_model",
+                                ofox.DEFAULT_MODEL_ID,
+                            )
+                            or ofox.DEFAULT_MODEL_ID
+                        ),
+                        key="ofox_text_to_video_model_input",
+                    )
+                    _set_runtime_config(
+                        "app", "ofox_text_to_video_model", ofox_model.strip()
+                    )
+                    configured_ofox_base_url = str(
+                        config.app.get("ofox_base_url", ofox.DEFAULT_BASE_URL)
+                        or ofox.DEFAULT_BASE_URL
+                    ).strip()
+                    ofox_base_url = st.text_input(
+                        tr("OFox Base URL"),
+                        value=(
+                            ""
+                            if configured_ofox_base_url == ofox.DEFAULT_BASE_URL
+                            else configured_ofox_base_url
+                        ),
+                        placeholder=ofox.DEFAULT_BASE_URL,
+                        key="ofox_base_url_input",
+                    )
+                    _set_runtime_config(
+                        "app",
+                        "ofox_base_url",
+                        ofox_base_url.strip() or ofox.DEFAULT_BASE_URL,
+                    )
+                    ofox_vendor_options = [
+                        (tr("OFox Vendor BytePlus"), "byteplus"),
+                        (tr("OFox Vendor Volcengine"), "volcengine"),
+                        (tr("OFox Vendor Auto"), ""),
+                    ]
+                    configured_ofox_vendor = str(
+                        config.app.get("ofox_provider", ofox.DEFAULT_PROVIDER_TYPE)
+                        or ""
+                    ).strip()
+                    if configured_ofox_vendor not in {
+                        value for _, value in ofox_vendor_options
+                    }:
+                        # 用户在 config.toml 手工钉定了其它厂商名时保留该选择，
+                        # 避免打开设置页就被下拉框覆盖回默认值。
+                        ofox_vendor_options.append(
+                            (configured_ofox_vendor, configured_ofox_vendor)
+                        )
+                    selected_ofox_vendor = stable_selectbox(
+                        tr("OFox Upstream Vendor"),
+                        options=[value for _, value in ofox_vendor_options],
+                        default_value=configured_ofox_vendor,
+                        key="ofox_provider_select",
+                        format_func=lambda value: dict(
+                            (v, label) for label, v in ofox_vendor_options
+                        )[value],
+                        help=tr("OFox Upstream Vendor Help"),
+                    )
+                    _set_runtime_config("app", "ofox_provider", selected_ofox_vendor)
+
+                    st.divider()
+                    st.markdown(f"**{tr('Shengsuan Cloud AI Video')}**")
+                    app_config_snapshot = config.snapshot_config_with_pending(config.app)
+                    if (
+                        str(app_config_snapshot.get("llm_provider", "") or "").lower()
+                        == "shengsuanyun"
+                    ):
+                        # 大模型 Provider 已选胜算云时，视频生成直接复用
+                        # 同一密钥，不再展示一个容易引起歧义的独立输入框。
+                        st.caption(tr("Shengsuan Cloud API Key Reused"))
+                    else:
+                        configured_loomloom_token = str(
+                            app_config_snapshot.get("loomloom_api_token", "") or ""
+                        ).strip()
+                        loomloom_api_token = st.text_input(
+                            tr("Shengsuan Cloud API Key"),
+                            value=configured_loomloom_token,
+                            type="password",
+                            key="loomloom_api_token_input",
+                            help=tr("Shengsuan Cloud API Key Help"),
+                            placeholder=tr("Shengsuan Cloud API Key Placeholder"),
+                        ).strip()
+                        _set_runtime_config(
+                            "app", "loomloom_api_token", loomloom_api_token
+                        )
+
+                    st.divider()
+                    seedance_api_key_value = str(
+                        config.app.get("volcengine_seedance_api_key", "") or ""
+                    ).strip()
+                    shared_ark_api_key = str(
+                        config.app.get("volcengine_api_key", "") or ""
+                    ).strip()
+                    environment_ark_api_key = os.getenv(
+                        "VOLCENGINE_ARK_API_KEY", ""
+                    ).strip()
+                    seedance_reuses_llm_key = bool(
+                        not seedance_api_key_value
+                        and not environment_ark_api_key
+                        and shared_ark_api_key
+                    )
+                    seedance_title = f"**{tr('Volcano Engine Seedance')}**"
+                    if seedance_reuses_llm_key:
+                        # 只有复用大模型密钥无法从当前输入框直接看出，保留该提示
+                        # 可以避免用户误以为必须重复填写；普通配置状态不再赘述。
+                        seedance_title += f" :blue[{tr('Reusing LLM API Key')}]"
+                    st.markdown(seedance_title)
+                    seedance_api_key = st.text_input(
+                        tr("Volcano Engine Ark API Key"),
+                        value=seedance_api_key_value,
+                        type="password",
+                        help=tr("Volcano Engine Ark API Key Help"),
+                        key="volcengine_seedance_api_key_input",
+                    )
+                    _set_runtime_config(
+                        "app", "volcengine_seedance_api_key", seedance_api_key.strip()
+                    )
+                    configured_seedance_model = str(
+                        config.app.get(
+                            "volcengine_seedance_model",
+                            volcengine_seedance.DEFAULT_MODEL_ID,
+                        )
+                        or volcengine_seedance.DEFAULT_MODEL_ID
+                    ).strip()
+                    seedance_model = st.text_input(
+                        tr("Volcano Engine Seedance Model"),
+                        # 内置默认值通过 placeholder 展示，用户自定义的
+                        # 模型或接入点 ID 仍作为真实值展示和保存。
+                        value=(
+                            ""
+                            if configured_seedance_model
+                            == volcengine_seedance.DEFAULT_MODEL_ID
+                            else configured_seedance_model
+                        ),
+                        placeholder=volcengine_seedance.DEFAULT_MODEL_ID,
+                        key="volcengine_seedance_model_input",
+                    )
+                    _set_runtime_config(
+                        "app",
+                        "volcengine_seedance_model",
+                        seedance_model.strip() or volcengine_seedance.DEFAULT_MODEL_ID,
+                    )
+                    configured_seedance_base_url = str(
+                        config.app.get(
+                            "volcengine_seedance_base_url",
+                            volcengine_seedance.DEFAULT_BASE_URL,
+                        )
+                        or volcengine_seedance.DEFAULT_BASE_URL
+                    ).strip()
+                    seedance_base_url = st.text_input(
+                        tr("Volcano Engine Ark Base URL"),
+                        value=(
+                            ""
+                            if configured_seedance_base_url
+                            == volcengine_seedance.DEFAULT_BASE_URL
+                            else configured_seedance_base_url
+                        ),
+                        placeholder=volcengine_seedance.DEFAULT_BASE_URL,
+                        key="volcengine_seedance_base_url_input",
+                    )
+                    _set_runtime_config(
+                        "app",
+                        "volcengine_seedance_base_url",
+                        seedance_base_url.strip() or volcengine_seedance.DEFAULT_BASE_URL,
+                    )
+
+                    st.divider()
+                    wavespeed_api_key = _get_material_api_keys("wavespeed_api_keys")
+                    st.markdown("**WaveSpeed**")
+                    wavespeed_api_key = st.text_input(
+                        tr("WaveSpeed API Key"),
+                        value=wavespeed_api_key,
+                        type="password",
+                        key="wavespeed_api_keys_input",
+                    )
+                    _save_material_api_keys("wavespeed_api_keys", wavespeed_api_key)
+
+                    st.divider()
+                    st.markdown(f"**{tr('MuAPI AI Video')}**")
+                    st.caption(tr("MuAPI AI Video Help"))
+                    muapi_api_key = st.text_input(
+                        tr("MuAPI API Key"),
+                        value=str(config.app.get("muapi_api_key", "") or ""),
+                        type="password",
+                        help=tr("MuAPI API Key Help"),
+                        key="muapi_api_key_input",
+                    )
+                    _set_runtime_config("app", "muapi_api_key", muapi_api_key.strip())
+                    configured_muapi_base_url = str(
+                        config.app.get("muapi_base_url", muapi.DEFAULT_BASE_URL)
+                        or muapi.DEFAULT_BASE_URL
+                    ).strip()
+                    muapi_base_url = st.text_input(
+                        tr("MuAPI Base URL"),
+                        value=(
+                            ""
+                            if configured_muapi_base_url == muapi.DEFAULT_BASE_URL
+                            else configured_muapi_base_url
+                        ),
+                        placeholder=muapi.DEFAULT_BASE_URL,
+                        key="muapi_base_url_input",
+                        help=tr("MuAPI Base URL Help"),
+                    )
+                    _set_runtime_config(
+                        "app",
+                        "muapi_base_url",
+                        muapi_base_url.strip() or muapi.DEFAULT_BASE_URL,
+                    )
+                    configured_muapi_endpoint = str(
+                        config.app.get("muapi_video_endpoint", muapi.DEFAULT_ENDPOINT)
+                        or muapi.DEFAULT_ENDPOINT
+                    ).strip()
+                    muapi_endpoint = st.text_input(
+                        tr("MuAPI Video Endpoint"),
+                        value=(
+                            ""
+                            if configured_muapi_endpoint == muapi.DEFAULT_ENDPOINT
+                            else configured_muapi_endpoint
+                        ),
+                        placeholder=muapi.DEFAULT_ENDPOINT,
+                        key="muapi_video_endpoint_input",
+                        help=tr("MuAPI Video Endpoint Help"),
+                    )
+                    _set_runtime_config(
+                        "app",
+                        "muapi_video_endpoint",
+                        muapi_endpoint.strip() or muapi.DEFAULT_ENDPOINT,
+                    )
+                    configured_muapi_resolution = str(
+                        config.app.get("muapi_resolution", muapi.DEFAULT_RESOLUTION)
+                        or muapi.DEFAULT_RESOLUTION
+                    ).strip()
+                    muapi_resolution = st.text_input(
+                        tr("MuAPI Resolution"),
+                        value=(
+                            ""
+                            if configured_muapi_resolution == muapi.DEFAULT_RESOLUTION
+                            else configured_muapi_resolution
+                        ),
+                        placeholder=muapi.DEFAULT_RESOLUTION,
+                        key="muapi_resolution_input",
+                        help=tr("MuAPI Resolution Help"),
+                    )
+                    _set_runtime_config(
+                        "app",
+                        "muapi_resolution",
+                        muapi_resolution.strip() or muapi.DEFAULT_RESOLUTION,
+                    )
+
+
+                with st.container(border=True):
+                    st.markdown(f"#### {tr('AI Image Generation APIs')}")
+                    st.caption(tr("AI Image Generation APIs Help"))
+                    st.markdown(f"**{tr('OpenAI Compatible Text-to-Image')}**")
+
+                    openai_image_base_url = st.text_input(
+                        tr("OpenAI Image Base URL"),
+                        value=str(config.app.get("openai_image_base_url", "") or ""),
+                        placeholder="https://api.openai.com/v1",
+                        key="openai_image_base_url_input",
+                    )
+                    _set_runtime_config(
+                        "app", "openai_image_base_url", openai_image_base_url.strip()
+                    )
+
+                    openai_image_api_key = _get_material_api_keys(
+                        "openai_image_api_keys"
+                    )
+                    openai_image_api_key = st.text_input(
+                        tr("OpenAI Image API Key"),
+                        value=openai_image_api_key,
+                        type="password",
+                        help=tr("OpenAI Image API Key Help"),
+                        key="openai_image_api_keys_input",
+                    )
+                    _save_material_api_keys(
+                        "openai_image_api_keys", openai_image_api_key
+                    )
+
+                    openai_image_model = st.text_input(
+                        tr("OpenAI Image Model"),
+                        value=str(config.app.get("openai_image_model", "") or ""),
+                        placeholder="gpt-image-2",
+                        key="openai_image_model_input",
+                    )
+                    _set_runtime_config(
+                        "app", "openai_image_model", openai_image_model.strip()
+                    )
+                    # 只展示参考值，不将 OpenAI 官方端点写成默认配置。
+                    # 兼容服务的 Base URL 和模型 ID 没有统一值；留空不会让
+                    # 用户在未知情时误连官方付费接口，也不会覆盖旧配置。
+                    st.caption(tr("OpenAI Image Configuration Example"))
+
+                    with st.expander(
+                        tr("OpenAI Image Advanced Settings"), expanded=False
+                    ):
+                        openai_image_size = st.text_input(
+                            tr("OpenAI Image Size"),
+                            value=str(config.app.get("openai_image_size", "") or ""),
+                            placeholder="1024x1536",
+                            help=tr("OpenAI Image Size Help"),
+                            key="openai_image_size_input",
+                        )
+                        _set_runtime_config(
+                            "app", "openai_image_size", openai_image_size.strip()
+                        )
+
+                        openai_image_prompt_template = st.text_input(
+                            tr("OpenAI Image Prompt Template"),
+                            value=str(
+                                config.app.get("openai_image_prompt_template", "") or ""
+                            ),
+                            placeholder="cinematic photo of {term}, photorealistic",
+                            help=tr("OpenAI Image Prompt Template Help"),
+                            key="openai_image_prompt_template_input",
+                        )
+                        _set_runtime_config(
+                            "app",
+                            "openai_image_prompt_template",
+                            openai_image_prompt_template.strip(),
+                        )
+
 
     _save_runtime_config()
 
@@ -4942,7 +5079,9 @@ def _render_script_settings(panel, params):
             # 同时避免样式误伤页面顶部的“基础设置”等其他折叠区域。
             with st.container(key="advanced_settings_script"):
                 with st.expander(tr("Advanced Script Settings"), expanded=False):
-                    script_backend_options = ["local", "loomloom"]
+                    script_backend_options = (
+                        ["local"] if asc_ai.local_only() else ["local", "loomloom"]
+                    )
                     script_backend_labels = {
                         "local": tr("Local LLM Script Generation"),
                         "loomloom": tr("Shengsuan Cloud Batch Script Generation"),
@@ -5087,6 +5226,7 @@ def _render_video_settings(panel, params):
                 (tr("Random"), "random"),
             ]
             video_source_labels = {
+                "asc_ai": tr("ASC-AI Director"),
                 "pexels": tr("Pexels"),
                 "pixabay": tr("Pixabay"),
                 "coverr": tr("Coverr"),
@@ -5100,16 +5240,25 @@ def _render_video_settings(panel, params):
                 "local": tr("Local file"),
             }
             saved_video_source_name = str(
-                config.app.get("video_source", "pexels") or "pexels"
+                config.app.get("video_source", "asc_ai") or "asc_ai"
             )
-            params.video_source = grouped_selectbox(
-                tr("Video Source"),
-                groups=(
+            if asc_ai.local_only():
+                video_source_groups = (
+                    (tr("AI Video"), ("asc_ai",)),
+                    (tr("Local Material"), VIDEO_SOURCE_GROUPS["local"]),
+                )
+                if saved_video_source_name not in {"asc_ai", "local"}:
+                    saved_video_source_name = "asc_ai"
+            else:
+                video_source_groups = (
                     (tr("Stock Video"), VIDEO_SOURCE_GROUPS["stock_video"]),
                     (tr("AI Video"), VIDEO_SOURCE_GROUPS["ai_video"]),
                     (tr("AI Image"), VIDEO_SOURCE_GROUPS["ai_image"]),
                     (tr("Local Material"), VIDEO_SOURCE_GROUPS["local"]),
-                ),
+                )
+            params.video_source = grouped_selectbox(
+                tr("Video Source"),
+                groups=video_source_groups,
                 default_value=saved_video_source_name,
                 key="video_source_select",
                 format_func=video_source_labels.get,
@@ -5126,6 +5275,269 @@ def _render_video_settings(panel, params):
                     _effective_loomloom_api_token()
                 )
 
+            if params.video_source == "asc_ai":
+                params.director_enabled = True
+                st.caption(tr("ASC-AI Director Help"))
+
+                with st.expander(tr("Director Settings"), expanded=True):
+                    egress_research_col, egress_media_col = st.columns(2)
+                    with egress_research_col:
+                        params.director_public_research_enabled = st.checkbox(
+                            tr("Director Public Research"),
+                            value=bool(
+                                config.ui.get(
+                                    "director_public_research_enabled",
+                                    config.asc_ai.get(
+                                        "public_research_enabled",
+                                        False,
+                                    ),
+                                )
+                            ),
+                            key="director_public_research_enabled",
+                            help=tr("Director Public Research Help"),
+                        )
+                    with egress_media_col:
+                        params.director_public_media_enabled = st.checkbox(
+                            tr("Director Public Media"),
+                            value=bool(
+                                config.ui.get(
+                                    "director_public_media_enabled",
+                                    config.asc_ai.get(
+                                        "public_media_enabled",
+                                        False,
+                                    ),
+                                )
+                            ),
+                            key="director_public_media_enabled",
+                            help=tr("Director Public Media Help"),
+                        )
+                    if (
+                        params.director_public_research_enabled
+                        or params.director_public_media_enabled
+                    ):
+                        st.warning(tr("Director Public Egress Warning"))
+
+                    _set_runtime_config(
+                        "ui",
+                        "director_public_research_enabled",
+                        params.director_public_research_enabled,
+                    )
+                    _set_runtime_config(
+                        "ui",
+                        "director_public_media_enabled",
+                        params.director_public_media_enabled,
+                    )
+                    _set_runtime_config(
+                        "asc_ai",
+                        "public_research_enabled",
+                        params.director_public_research_enabled,
+                    )
+                    _set_runtime_config(
+                        "asc_ai",
+                        "public_media_enabled",
+                        params.director_public_media_enabled,
+                    )
+
+                    duration_col, video_scene_col, public_scene_col = st.columns(3)
+                    with duration_col:
+                        params.director_target_duration_seconds = int(
+                            st.slider(
+                                tr("Director Target Duration"),
+                                min_value=5,
+                                max_value=300,
+                                value=int(
+                                    config.ui.get(
+                                        "director_target_duration_seconds",
+                                        params.director_target_duration_seconds,
+                                    )
+                                ),
+                                step=5,
+                                key="director_target_duration_seconds",
+                                help=tr("Director Target Duration Help"),
+                            )
+                        )
+                    with video_scene_col:
+                        params.director_max_local_video_scenes = int(
+                            st.slider(
+                                tr("Director Local Video Scenes"),
+                                min_value=0,
+                                max_value=6,
+                                value=int(
+                                    config.ui.get(
+                                        "director_max_local_video_scenes",
+                                        params.director_max_local_video_scenes,
+                                    )
+                                ),
+                                step=1,
+                                key="director_max_local_video_scenes",
+                                help=tr("Director Local Video Scenes Help"),
+                            )
+                        )
+
+                    with public_scene_col:
+                        params.director_max_public_image_scenes = int(
+                            st.slider(
+                                tr("Director Public Image Scenes"),
+                                min_value=0,
+                                max_value=6,
+                                value=int(
+                                    config.ui.get(
+                                        "director_max_public_image_scenes",
+                                        config.asc_ai.get(
+                                            "director_max_public_image_scenes",
+                                            params.director_max_public_image_scenes,
+                                        ),
+                                    )
+                                ),
+                                step=1,
+                                key="director_max_public_image_scenes",
+                                help=tr("Director Public Image Scenes Help"),
+                                disabled=not params.director_public_media_enabled,
+                            )
+                        )
+
+                    try:
+                        character_ids = _get_asc_ai_character_ids()
+                    except asc_ai.AscAIError as exc:
+                        character_ids = []
+                        st.warning(
+                            tr("Character Hub Unavailable").format(error=str(exc))
+                        )
+                    saved_character_id = str(
+                        config.ui.get(
+                            "director_character_id",
+                            getattr(params, "director_character_id", ""),
+                        )
+                        or ""
+                    )
+                    if saved_character_id and saved_character_id not in character_ids:
+                        character_ids = [saved_character_id, *character_ids]
+                    character_options = ["", *character_ids]
+                    params.director_character_id = stable_selectbox(
+                        tr("Director Character"),
+                        options=character_options,
+                        default_value=(
+                            saved_character_id
+                            if saved_character_id in character_options
+                            else ""
+                        ),
+                        key="director_character_id",
+                        format_func=lambda value: (
+                            tr("No Director Character") if not value else value
+                        ),
+                        help=tr("Director Character Help"),
+                    )
+                    _set_runtime_config(
+                        "ui",
+                        "director_character_id",
+                        params.director_character_id,
+                    )
+                    if params.director_character_id:
+                        try:
+                            character_identity = _get_asc_ai_character_identity(
+                                params.director_character_id
+                            )
+                            st.caption(
+                                tr("Director Character Summary").format(
+                                    name=character_identity.get("name")
+                                    or params.director_character_id,
+                                    kind=character_identity.get(
+                                        "visual_identity_kind"
+                                    )
+                                    or "PROMPT_ONLY",
+                                    refs=len(
+                                        character_identity.get(
+                                            "reference_artifact_ids"
+                                        )
+                                        or []
+                                    ),
+                                    loras=len(
+                                        character_identity.get(
+                                            "lora_resource_ids"
+                                        )
+                                        or []
+                                    ),
+                                )
+                            )
+                        except asc_ai.AscAIError as exc:
+                            st.warning(
+                                tr("Character Hub Unavailable").format(
+                                    error=str(exc)
+                                )
+                            )
+
+                    params.director_style = st.text_input(
+                        tr("Director Visual Style"),
+                        value=str(
+                            config.ui.get(
+                                "director_style",
+                                params.director_style
+                                or config.asc_ai.get("director_style", ""),
+                            )
+                            or ""
+                        ),
+                        key="director_style",
+                    )
+                    audience_col, purpose_col = st.columns(2)
+                    with audience_col:
+                        params.director_audience = st.text_input(
+                            tr("Director Audience"),
+                            value=str(
+                                config.ui.get(
+                                    "director_audience", params.director_audience
+                                )
+                                or ""
+                            ),
+                            key="director_audience",
+                        )
+                    with purpose_col:
+                        params.director_purpose = st.text_input(
+                            tr("Director Purpose"),
+                            value=str(
+                                config.ui.get(
+                                    "director_purpose", params.director_purpose
+                                )
+                                or ""
+                            ),
+                            key="director_purpose",
+                        )
+
+                    _set_runtime_config(
+                        "ui",
+                        "director_target_duration_seconds",
+                        params.director_target_duration_seconds,
+                    )
+                    _set_runtime_config(
+                        "ui",
+                        "director_max_local_video_scenes",
+                        params.director_max_local_video_scenes,
+                    )
+                    _set_runtime_config(
+                        "ui",
+                        "director_max_public_image_scenes",
+                        params.director_max_public_image_scenes,
+                    )
+                    _set_runtime_config("ui", "director_style", params.director_style)
+                    _set_runtime_config(
+                        "ui", "director_audience", params.director_audience
+                    )
+                    _set_runtime_config(
+                        "ui", "director_purpose", params.director_purpose
+                    )
+
+                    if st.button(
+                        tr("Check ASC-AI"),
+                        key="check_asc_ai_health",
+                        icon=":material/health_and_safety:",
+                    ):
+                        try:
+                            status = asc_ai.health(params)
+                            st.success(tr("ASC-AI Ready"))
+                            st.json(status, expanded=False)
+                        except asc_ai.AscAIError as exc:
+                            st.error(
+                                tr("ASC-AI Unavailable").format(error=str(exc))
+                            )
             if params.video_source == "wavespeed":
                 st.caption(tr("WaveSpeed AI Video Help"))
             if params.video_source == "volcengine_seedance":
@@ -6471,9 +6883,14 @@ def _render_background_music_settings(params, elevenlabs_api_key_rendered=False)
         (tr("Random Background Music"), "random"),
         (tr("Preset Song"), "preset"),
         (tr("Custom Background Music"), "custom"),
-        (tr("Sonilo Background Music"), "sonilo"),
-        (tr("ElevenLabs Background Music"), "elevenlabs"),
     ]
+    if not asc_ai.local_only():
+        bgm_options.extend(
+            [
+                (tr("Sonilo Background Music"), "sonilo"),
+                (tr("ElevenLabs Background Music"), "elevenlabs"),
+            ]
+        )
     selected_bgm_type = stable_selectbox(
         tr("Background Music Source"),
         options=[value for _, value in bgm_options],
@@ -6807,23 +7224,26 @@ def _render_audio_settings(panel, params):
 
             # Provider 下拉只负责选择自动配音服务；无配音已经由上方模式控制，
             # 不再作为 TTS Provider 混入列表，避免两个入口表达同一状态。
-            tts_servers = [
-                ("azure-tts-v1", "Azure TTS V1 (Edge TTS)"),
-                ("azure-tts-v2", "Azure TTS V2"),
-                ("siliconflow", "SiliconFlow TTS"),
-                ("gemini-tts", "Google Gemini TTS"),
-                ("mimo-tts", "Xiaomi MiMo TTS"),
-                ("minimax-tts", "MiniMax TTS"),
-                ("elevenlabs", "ElevenLabs TTS"),
-                ("chatterbox", "Chatterbox TTS"),
-                ("kokoro", "Kokoro TTS"),
-                ("fish_audio", "Fish Audio TTS"),
-                ("voxcpm", "VoxCPM TTS"),
-            ]
+            if asc_ai.local_only():
+                tts_servers = [("chatterbox", "Chatterbox TTS")]
+            else:
+                tts_servers = [
+                    ("azure-tts-v1", "Azure TTS V1 (Edge TTS)"),
+                    ("azure-tts-v2", "Azure TTS V2"),
+                    ("siliconflow", "SiliconFlow TTS"),
+                    ("gemini-tts", "Google Gemini TTS"),
+                    ("mimo-tts", "Xiaomi MiMo TTS"),
+                    ("minimax-tts", "MiniMax TTS"),
+                    ("elevenlabs", "ElevenLabs TTS"),
+                    ("chatterbox", "Chatterbox TTS"),
+                    ("kokoro", "Kokoro TTS"),
+                    ("fish_audio", "Fish Audio TTS"),
+                    ("voxcpm", "VoxCPM TTS"),
+                ]
 
             tts_server_values = [server_value for server_value, _ in tts_servers]
             if saved_tts_server not in tts_server_values:
-                saved_tts_server = "azure-tts-v1"
+                saved_tts_server = "chatterbox" if asc_ai.local_only() else "azure-tts-v1"
 
             if tts_mode_enabled:
                 selected_tts_server = stable_selectbox(

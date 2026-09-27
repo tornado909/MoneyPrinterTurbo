@@ -229,7 +229,7 @@ def get_chatterbox_voices() -> list[str]:
         result.append(v if v.startswith("chatterbox:") else f"chatterbox:{v}")
     if not result:
         # keep the dropdown usable even before any voice is configured
-        result = ["chatterbox:default-Female"]
+        result = ["chatterbox:ru-default"]
     return result
 
 
@@ -2162,11 +2162,12 @@ def _openai_compatible_tts(
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    native_format = "wav" if provider == "chatterbox" else "mp3"
     payload = {
         "model": model_id,
         "input": text,
         "voice": voice,
-        "response_format": "mp3",
+        "response_format": native_format,
         # OpenAI speech API accepts speed 0.25-4.0; MoneyPrinterTurbo's rate is a
         # 1.0-centred multiplier, so it maps directly (clamped to the valid range).
         "speed": max(0.25, min(4.0, float(voice_rate or 1.0))),
@@ -2194,7 +2195,7 @@ def _openai_compatible_tts(
             # 已有试听/配音；先关闭文件再解码和替换，兼容 Windows 文件占用规则。
             with tempfile.NamedTemporaryFile(
                 dir=os.path.dirname(os.path.abspath(voice_file)),
-                suffix=".mp3", delete=False,
+                suffix=f".{native_format}", delete=False,
             ) as f:
                 temporary_audio = f.name
                 f.write(response.content)
@@ -2254,7 +2255,7 @@ def chatterbox_tts(
         logger.error("Chatterbox TTS text is empty")
         return None
 
-    base_url = (config.chatterbox.get("base_url", "") or "").strip().rstrip("/")
+    base_url = (os.getenv("MPT_CHATTERBOX_BASE_URL") or config.chatterbox.get("base_url", "") or "").strip().rstrip("/")
     if not base_url:
         logger.error(
             "Chatterbox base_url is not set, please configure [chatterbox] base_url in config.toml"
@@ -2263,7 +2264,7 @@ def chatterbox_tts(
 
     api_key = config.chatterbox.get("api_key", "")
     if not model_id:
-        model_id = config.chatterbox.get("model_id", "chatterbox") or "chatterbox"
+        model_id = config.chatterbox.get("model_id", "tts-1") or "tts-1"
 
     return _openai_compatible_tts(
         "chatterbox", base_url, api_key, model_id, voice, text, voice_rate, voice_file

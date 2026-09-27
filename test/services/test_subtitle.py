@@ -164,6 +164,7 @@ class TestSubtitleService(unittest.TestCase):
                     "audio.mp3",
                     str(subtitle_file),
                     word_level=True,
+                    language="ru-RU",
                 )
 
             items = subtitle.file_to_subtitles(str(subtitle_file))
@@ -171,6 +172,8 @@ class TestSubtitleService(unittest.TestCase):
         self.assertEqual([item[2] for item in items], ["Hello", "world"])
         self.assertIs(transcribe_kwargs["word_timestamps"], True)
         self.assertIs(transcribe_kwargs["vad_filter"], True)
+        self.assertEqual(transcribe_kwargs["language"], "ru")
+        self.assertEqual(transcribe_kwargs["beam_size"], subtitle.beam_size)
         self.assertIn("00:00:00,100 --> 00:00:00,400", items[0][1])
         self.assertIn("00:00:00,400 --> 00:00:00,800", items[1][1])
 

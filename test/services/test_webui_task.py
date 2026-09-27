@@ -41,6 +41,86 @@ def _log_record(file_path, message="generation finished"):
     }
 
 
+def test_webui_startup_recovery_closes_only_interrupted_webui_jobs():
+    previous = webui_task._startup_recovery_done
+    try:
+        webui_task._startup_recovery_done = False
+        tasks = [
+            {
+                "task_id": "webui-running",
+                "state": const.TASK_STATE_PROCESSING,
+                "queue_executor": "webui",
+            },
+            {
+                "task_id": "api-running",
+                "state": const.TASK_STATE_PROCESSING,
+                "queue_executor": "api",
+            },
+            {
+                "task_id": "webui-complete",
+                "state": const.TASK_STATE_COMPLETE,
+                "queue_executor": "webui",
+            },
+        ]
+        with patch.object(webui_task.sm, "state") as state:
+            state.get_all_tasks.return_value = (tasks, len(tasks))
+            state.patch_task.return_value = True
+
+            recovered = webui_task.recover_interrupted_webui_tasks()
+            second = webui_task.recover_interrupted_webui_tasks()
+
+        assert recovered == ["webui-running"]
+        assert second == []
+        state.get_all_tasks.assert_called_once_with(1, 200)
+        state.patch_task.assert_called_once()
+        call = state.patch_task.call_args
+        assert call.args[0] == "webui-running"
+        assert call.kwargs["state"] == const.TASK_STATE_FAILED
+        assert call.kwargs["failed_stage"] == "webui_startup_recovery"
+        assert call.kwargs["retryable"] is True
+        assert call.kwargs["recovery_action"] == "resubmit"
+    finally:
+        webui_task._startup_recovery_done = previous
+
+
+def test_webui_startup_recovery_retries_after_transient_state_failure():
+    previous = webui_task._startup_recovery_done
+    try:
+        webui_task._startup_recovery_done = False
+        with patch.object(webui_task.sm, "state") as state:
+            state.get_all_tasks.side_effect = [
+                RuntimeError("redis unavailable"),
+                ([], 0),
+            ]
+            with pytest.raises(RuntimeError, match="redis unavailable"):
+                webui_task.recover_interrupted_webui_tasks()
+
+            assert webui_task._startup_recovery_done is False
+            assert webui_task.recover_interrupted_webui_tasks() == []
+            assert webui_task._startup_recovery_done is True
+            assert state.get_all_tasks.call_count == 2
+    finally:
+        webui_task._startup_recovery_done = previous
+
+
+def test_main_invokes_webui_recovery_before_page_rendering():
+    tree = ast.parse(WEBUI_MAIN.read_text(encoding="utf-8"))
+    calls = [
+        (_attribute_name(node.func), node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    ]
+    recovery_line = next(
+        line
+        for name, line in calls
+        if name == "webui_task.recover_interrupted_webui_tasks"
+    )
+    page_config_line = next(
+        line for name, line in calls if name == "st.set_page_config"
+    )
+    assert recovery_line < page_config_line
+
+
 def test_generation_controls_submit_background_task_instead_of_blocking_page():
     """
     WebUI 生成按钮不能重新直接调用同步流水线。

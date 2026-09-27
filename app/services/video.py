@@ -12,6 +12,7 @@ import time
 import unicodedata
 from contextlib import ExitStack, redirect_stdout
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 from loguru import logger
 import numpy as np
@@ -21,6 +22,7 @@ from moviepy import (
     CompositeAudioClip,
     CompositeVideoClip,
     ImageClip,
+    concatenate_videoclips,
     TextClip,
     VideoFileClip,
     afx,
@@ -1528,6 +1530,196 @@ def generate_video(
             fps=fps,
         )
         return bgm_mix_succeeded
+
+
+def fit_director_video_duration(
+    video_path: str,
+    image_path: str,
+    target_duration: float,
+) -> str:
+    """Fit one canonical Wan scene to Director timing without another GPU job.
+
+    The validated ASC-AI Wan baseline remains untouched. If Director needs less
+    time, the approved video is trimmed. If it needs more, the generated source
+    image is held as a subtle zoom tail. The result is a normal scene clip that
+    downstream montage can treat exactly like a still-rendered scene.
+    """
+    target = max(2.0, min(15.0, float(target_duration or 5.0)))
+    source = _open_video_clip_quietly(video_path)
+    try:
+        native_duration = float(source.duration or 0.0)
+        if native_duration <= 0:
+            raise ValueError("Director Wan clip has no measurable duration")
+        if abs(native_duration - target) <= 0.05:
+            return video_path
+
+        output_path = str(
+            Path(video_path).with_name(Path(video_path).stem + ".timed.mp4")
+        )
+        if native_duration > target:
+            trimmed = source.subclipped(0, target)
+            try:
+                _write_videofile_with_codec_fallback(
+                    trimmed,
+                    output_path,
+                    codec=_get_configured_video_codec(),
+                    audio=False,
+                    fps=fps,
+                    logger=None,
+                )
+            finally:
+                close_clip(trimmed)
+            return output_path
+
+        remaining = target - native_duration
+        tail = (
+            ImageClip(image_path)
+            .with_duration(remaining)
+            .resized(new_size=source.size)
+            .with_position("center")
+        )
+        try:
+            # Keep the extension visually alive instead of a perfectly frozen
+            # hold, but do not ask any neural model to create extra motion.
+            zoom_tail = tail.resized(
+                lambda t: 1 + 0.02 * (t / max(remaining, 0.001))
+            )
+            try:
+                combined = concatenate_videoclips(
+                    [source, zoom_tail],
+                    method="compose",
+                ).with_duration(target)
+                try:
+                    _write_videofile_with_codec_fallback(
+                        combined,
+                        output_path,
+                        codec=_get_configured_video_codec(),
+                        audio=False,
+                        fps=fps,
+                        logger=None,
+                    )
+                finally:
+                    close_clip(combined)
+            finally:
+                close_clip(zoom_tail)
+        finally:
+            close_clip(tail)
+        return output_path
+    finally:
+        close_clip(source)
+
+
+_DIRECTOR_TRANSITIONS = {
+    "cut",
+    "fade_in",
+    "fade_out",
+    "slide_in",
+    "slide_out",
+    "zoom_in",
+    "zoom_out",
+}
+
+
+def _apply_director_transition(clip, transition: str):
+    value = str(transition or "cut").strip().lower()
+    if value not in _DIRECTOR_TRANSITIONS:
+        raise ValueError(f"unsupported Director transition: {transition}")
+    if value == "cut":
+        return clip
+
+    edge_duration = min(0.5, max(0.15, float(clip.duration or 0) / 4.0))
+    if value == "fade_in":
+        return video_effects.fadein_transition(clip, edge_duration)
+    if value == "fade_out":
+        return video_effects.fadeout_transition(clip, edge_duration)
+    if value == "slide_in":
+        return video_effects.slidein_transition(clip, edge_duration, "left")
+    if value == "slide_out":
+        return video_effects.slideout_transition(clip, edge_duration, "right")
+    if value == "zoom_in":
+        return video_effects.zoomin_transition(clip, edge_duration)
+    if value == "zoom_out":
+        return video_effects.zoomout_transition(clip, edge_duration)
+    return clip
+
+
+def render_director_scene_effects(
+    video_path: str,
+    *,
+    transition: str = "cut",
+    overlay_text: str = "",
+    font_name: str = "MicrosoftYaHeiBold.ttc",
+) -> str:
+    """Bake Director transition/callout into one already-rendered scene clip."""
+    transition = str(transition or "cut").strip().lower()
+    overlay_text = str(overlay_text or "").strip()[:160]
+    if transition == "cut" and not overlay_text:
+        return video_path
+
+    source_path = Path(video_path)
+    if not source_path.is_file():
+        raise FileNotFoundError(video_path)
+    output_path = source_path.with_name(source_path.stem + ".director.mp4")
+
+    with ExitStack() as stack:
+        source = stack.enter_context(_open_video_clip_quietly(str(source_path)))
+        working = source
+
+        if transition != "cut":
+            transformed = _apply_director_transition(working, transition)
+            if transformed is not working:
+                stack.callback(transformed.close)
+            working = transformed
+
+        if overlay_text:
+            font_path = utils.font_dir(font_name)
+            if not os.path.isfile(font_path):
+                font_path = utils.font_dir("STHeitiMedium.ttc")
+            font_size = max(28, min(72, int(source.w * 0.045)))
+            text_clip = TextClip(
+                text=overlay_text,
+                font=font_path,
+                font_size=font_size,
+                color="#FFFFFF",
+                bg_color=None,
+                stroke_color="#000000",
+                stroke_width=2,
+                size=(max(200, int(source.w * 0.82)), None),
+                text_align="center",
+                margin=(12, 10),
+            )
+            stack.callback(text_clip.close)
+            callout_duration = min(
+                max(1.0, float(source.duration or 0) * 0.5),
+                3.5,
+                max(1.0, float(source.duration or 0)),
+            )
+            callout_start = min(
+                0.25,
+                max(0.0, float(source.duration or 0) - callout_duration),
+            )
+            callout = (
+                text_clip.with_start(callout_start)
+                .with_duration(callout_duration)
+                .with_position(("center", max(20, int(source.h * 0.10))))
+            )
+            stack.callback(callout.close)
+            composite = CompositeVideoClip(
+                [working, callout],
+                size=working.size,
+            ).with_duration(working.duration)
+            stack.callback(composite.close)
+            working = composite
+
+        _write_videofile_with_codec_fallback(
+            working,
+            str(output_path),
+            codec=_get_configured_video_codec(),
+            audio=False,
+            fps=fps,
+            logger=None,
+        )
+    return str(output_path)
 
 
 def render_image_zoom_video(image_path: str, clip_duration: int = 5) -> str:

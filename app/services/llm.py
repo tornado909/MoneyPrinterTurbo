@@ -15,6 +15,7 @@ from openai.types.chat import ChatCompletion
 
 from app.config import config
 from app.models.llm_provider import DEFAULT_LLM_PROVIDER_ID, get_llm_provider
+from app.services import asc_ai_director
 from app.utils import utils
 
 _max_retries = 5
@@ -260,6 +261,59 @@ def _generate_response(prompt: str, app_config=None) -> str:
         # 的配置快照，确保模型请求重试期间不会因为后台任务结束并应用新配置，
         # 而切换到另一个 Provider、Base URL 或模型。
         runtime_app_config = app_config if app_config is not None else config.app
+
+        # Russian Edition strict-local policy applies to every text-generation
+        # entry point, not only the full Director video pipeline. This prevents
+        # /scripts, /terms and WebUI helpers from accidentally reaching a saved
+        # cloud provider while local_only=true.
+        if bool(config.asc_ai.get("enabled", False)) and bool(
+            config.asc_ai.get("local_only", False)
+        ):
+            scheduler_url = (
+                os.getenv("ASC_AI_SCHEDULER_URL")
+                or str(config.asc_ai.get("scheduler_url", "http://127.0.0.1:8090"))
+            ).rstrip("/")
+            prompt_llm_url = (
+                os.getenv("ASC_AI_PROMPT_LLM_URL")
+                or str(config.asc_ai.get("prompt_llm_url", "http://127.0.0.1:8080"))
+            ).rstrip("/")
+            runtime = asc_ai_director.SchedulerManagedLocalLLM(
+                scheduler_url,
+                prompt_llm_url,
+                model_id=str(
+                    config.asc_ai.get("director_model_id", "qwen3-8b-q4km")
+                ),
+                model_name=str(
+                    config.asc_ai.get(
+                        "director_model_name", "Qwen3-8B-Q4_K_M.gguf"
+                    )
+                ),
+                estimated_vram_mb=int(
+                    config.asc_ai.get("director_vram_mb", 7600)
+                ),
+                priority=int(config.asc_ai.get("director_priority", 150)),
+                admission_timeout=float(
+                    config.asc_ai.get("director_admission_timeout_seconds", 300)
+                ),
+            )
+            content = runtime.chat(
+                prompt,
+                timeout=float(config.asc_ai.get("director_timeout_seconds", 420)),
+                temperature=float(
+                    config.asc_ai.get("generic_text_temperature", 0.35)
+                ),
+                max_tokens=int(
+                    config.asc_ai.get("generic_text_max_tokens", 2500)
+                ),
+                system_prompt=(
+                    "You are a concise local text-generation service for a "
+                    "video-production application. Follow the user's requested "
+                    "language and output format exactly. Return only the final "
+                    "answer; never include chain-of-thought."
+                ),
+            )
+            return _normalize_text_response(content, "asc-ai-local-qwen3")
+
         llm_provider = str(
             runtime_app_config.get("llm_provider", DEFAULT_LLM_PROVIDER_ID)
         ).lower()

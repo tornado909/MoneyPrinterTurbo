@@ -108,6 +108,45 @@ class TestScriptPromptOptions(unittest.TestCase):
         self.assertIn("- number of paragraphs: 2", prompt)
         self.assertIn("- language: en", prompt)
 
+    def test_local_only_routes_generic_llm_calls_to_scheduler_managed_qwen(self):
+        old_asc = dict(config.asc_ai)
+        try:
+            config.asc_ai.update(
+                {
+                    "enabled": True,
+                    "local_only": True,
+                    "scheduler_url": "http://scheduler:8090",
+                    "prompt_llm_url": "http://prompt-llm:8080",
+                    "director_model_id": "qwen3-8b-q4km",
+                    "director_model_name": "Qwen3-8B-Q4_K_M.gguf",
+                }
+            )
+            with patch.object(
+                llm.asc_ai_director, "SchedulerManagedLocalLLM"
+            ) as runtime_cls:
+                runtime = runtime_cls.return_value
+                runtime.chat.return_value = "Локальный ответ"
+                result = llm._generate_response(
+                    "Сделай сценарий",
+                    app_config={
+                        "llm_provider": "openai",
+                        "openai_api_key": "must-not-be-used",
+                    },
+                )
+
+            self.assertEqual(result, "Локальный ответ")
+            runtime_cls.assert_called_once()
+            runtime.chat.assert_called_once()
+            self.assertEqual(
+                runtime.chat.call_args.kwargs["system_prompt"].startswith(
+                    "You are a concise local text-generation service"
+                ),
+                True,
+            )
+        finally:
+            config.asc_ai.clear()
+            config.asc_ai.update(old_asc)
+
     def test_generate_script_sends_custom_prompt_to_llm(self):
         captured = {}
 

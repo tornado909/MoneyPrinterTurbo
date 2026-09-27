@@ -112,10 +112,23 @@ class VideoParams(BaseModel):
     video_transition_mode: Optional[VideoTransitionMode] = None
     video_clip_duration: int = Field(default=5, ge=1)
     video_clip_speed: Optional[float] = 1.0
-    match_materials_to_script: bool = False
+    match_materials_to_script: bool = True
     video_count: int = Field(default=1, ge=1)
 
-    video_source: Optional[str] = "pexels"
+    # Russian Edition: ASC-AI Director is the default local production source.
+    video_source: Optional[str] = "asc_ai"
+    director_enabled: bool = True
+    director_target_duration_seconds: int = Field(default=45, ge=5, le=300)
+    director_max_local_video_scenes: int = Field(default=1, ge=0, le=6)
+    director_max_public_image_scenes: int = Field(default=2, ge=0, le=6)
+    director_style: str = Field(default="", max_length=2000)
+    director_audience: str = Field(default="", max_length=1000)
+    director_purpose: str = Field(default="", max_length=1000)
+    director_character_id: str = Field(default="", max_length=128)
+    # None follows global [asc_ai] public_research_enabled; True/False is a
+    # per-task override used by WebUI/headless ASC-AI production requests.
+    director_public_research_enabled: Optional[bool] = None
+    director_public_media_enabled: Optional[bool] = None
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )

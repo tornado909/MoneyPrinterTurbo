@@ -1,0 +1,71 @@
+# ASC-AI integration override.
+# Run:
+#   docker compose -f docker-compose.yml -f docker-compose.asc-ai.yml up -d --build
+#
+# MoneyPrinterTurbo itself stays CPU-only. All neural GPU work is delegated to
+# ASC-AI services that acquire GPU Scheduler leases.
+x-asc-ai-env: &asc-ai-env
+  ASC_AI_PROMPT_URL: http://prompt-intelligence:8094
+  ASC_AI_IMAGE_ADAPTER_URL: http://image-adapter:8091
+  ASC_AI_VISUAL_ANALYZER_URL: http://visual-analyzer:8095
+  ASC_AI_CHARACTER_HUB_URL: http://character-chat:8096
+  ASC_AI_SCHEDULER_URL: http://gpu-scheduler:8090
+  ASC_AI_PROMPT_LLM_URL: http://prompt-llm-local:8080
+  # Run the official local Chatterbox OpenAI-compatible server on host port
+  # 4123. Override MPT_CHATTERBOX_BASE_URL if you expose it elsewhere.
+  MPT_CHATTERBOX_BASE_URL: ${MPT_CHATTERBOX_BASE_URL:-http://host.docker.internal:4123/v1}
+  MPT_APP_ENABLE_REDIS: "true"
+  MPT_APP_REDIS_HOST: redis
+
+x-asc-ai-volumes: &asc-ai-volumes
+  - ./:/MoneyPrinterTurbo
+  - /srv/ai-data:/srv/ai-data
+
+x-mpt-extra-hosts: &mpt-extra-hosts
+  - "host.docker.internal:host-gateway"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: moneyprinterturbo-redis
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - mpt-redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - default
+
+  webui:
+    environment: *asc-ai-env
+    extra_hosts: *mpt-extra-hosts
+    volumes: *asc-ai-volumes
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+      - asc-ai
+
+  api:
+    environment: *asc-ai-env
+    extra_hosts: *mpt-extra-hosts
+    volumes: *asc-ai-volumes
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+      - asc-ai
+
+volumes:
+  mpt-redis-data:
+
+networks:
+  asc-ai:
+    external: true
+    name: asc-ai-stack_default

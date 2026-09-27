@@ -75,7 +75,7 @@ tls_verify = true
 # "openai_image" generates one image per script keyword through any
 # OpenAI-compatible /images/generations endpoint (local ComfyUI/SD gateways
 # or cloud relays) and renders it into a video clip.
-video_source = "pexels"
+video_source = "asc_ai"
 
 # API key lists support key rotation. Use straight ASCII double quotes and
 # separate multiple keys with commas, for example: ["key-1", "key-2"].
@@ -237,7 +237,11 @@ sonilo_timeout = 600
 # Provider definitions, default models, and default Base URLs are maintained in
 # app/models/llm_provider.py. Leave model_name and base_url empty to follow the
 # Registry defaults; only set them when you need an explicit override.
-llm_provider = "moonshot"
+# Local-first fork default. In strict ASC-AI local_only mode this setting is
+# bypassed entirely in favor of scheduler-managed prompt-llm-local. If ASC-AI
+# is disabled, Ollama remains a local fallback instead of silently selecting a
+# cloud provider.
+llm_provider = "ollama"
 
 # Kimi / Moonshot AI
 # API key: https://platform.kimi.com?track_id=track-2f5441d6ffd84c509dd079d78e9db5dc&aff=moneyprinterturbo
@@ -433,7 +437,7 @@ mimo_tts_style_prompt = "请用自然、清晰、适合短视频旁白的语气�
 # Subtitle provider: "edge" or "whisper". Whisper is loaded only when selected
 # explicitly; Edge failures do not trigger an automatic Whisper model download.
 # Leave empty to skip generation.
-subtitle_provider = "edge"
+subtitle_provider = "whisper"
 
 # FFmpeg is normally downloaded and detected automatically. If detection fails,
 # download it from https://www.gyan.dev/ffmpeg/builds/ and set the executable.
@@ -507,11 +511,16 @@ upload_post_max_pending_tasks = 10
 [whisper]
 # The model is downloaded automatically on first use unless a matching local
 # directory exists at ./models/whisper-{model_size}.
-model_size = "large-v3"
+model_size = "large-v3-turbo"
 # device: "cpu" or "cuda". Common compute types include "int8" for CPU and
 # "float16" or "int8_float16" for CUDA.
 device = "cpu"
 compute_type = "int8"
+# CPU-local defaults tuned for clean synthesized narration. Raise beam_size for
+# noisy uploaded speech if accuracy matters more than latency.
+cpu_threads = 4
+num_workers = 1
+beam_size = 1
 # Optional prompt that biases Whisper's decoder toward specific vocabulary
 # (brand names, technical terms). Passed as initial_prompt to transcribe().
 # Leave empty to disable.
@@ -576,9 +585,12 @@ music_timeout = 600
 # travisvn/chatterbox-tts-api running locally on port 4123.
 base_url = "http://127.0.0.1:4123/v1"
 api_key = ""
-model_id = "chatterbox"
+model_id = "tts-1"
 # Voice names exposed by the configured Chatterbox server.
-voices = ["default-Female"]
+# The ASC-AI Russian production path requires ru-default to be uploaded with
+# language=ru; scripts/bootstrap-chatterbox-ru-voice.sh does this idempotently.
+voices = ["ru-default"]
+default_voice = "ru-default"
 
 [kokoro]
 # OpenAI-compatible Kokoro TTS server (hexgrad/Kokoro-82M, Apache-2.0, runs on CPU).
@@ -626,6 +638,94 @@ model_id = ""
 voice_id = "default"
 
 # =============================================================================
+# ASC-AI Local Production
+# =============================================================================
+
+[asc_ai]
+enabled = true
+local_only = true
+# Optional additional internal DNS names allowed for ASC-AI service endpoints.
+# Loopback, RFC1918/link-local IPs, *.local and the built-in Docker service
+# names are already allowed. Public/cloud hostnames stay blocked in local_only.
+local_service_hosts = []
+prompt_intelligence_url = "http://127.0.0.1:8094"
+image_adapter_url = "http://127.0.0.1:8091"
+visual_analyzer_url = "http://127.0.0.1:8095"
+character_hub_url = "http://127.0.0.1:8096"
+character_hub_timeout_seconds = 10
+scheduler_url = "http://127.0.0.1:8090"
+prompt_llm_url = "http://127.0.0.1:8080"
+input_root = "/srv/ai-data/input"
+director_target_duration_seconds = 45
+director_scene_duration_seconds = 7
+director_max_local_video_scenes = 1
+director_timeout_seconds = 420
+director_admission_timeout_seconds = 300
+director_model_id = "qwen3-8b-q4km"
+director_model_name = "Qwen3-8B-Q4_K_M.gguf"
+director_vram_mb = 7600
+director_priority = 150
+director_temperature = 0.45
+director_max_tokens = 3500
+director_style = "cinematic documentary realism, clean composition"
+director_max_public_image_scenes = 2
+# Optional non-AI public asset router. OFF by default to keep corporate topics
+# fully private. Enable globally or per task only when sending a scene search
+# query to Wikimedia Commons is acceptable. Every accepted asset keeps
+# license/author provenance with a local-generation fallback.
+public_media_enabled = false
+public_media_max_results = 6
+public_media_timeout_seconds = 12
+public_media_cache_ttl_seconds = 3600
+public_media_max_bytes = 20971520
+# Font used only for short Director overlay_text callouts baked into scene clips.
+director_overlay_font = "MicrosoftYaHeiBold.ttc"
+# Optional free public factual grounding. OFF by default for privacy. When
+# enabled, the video topic is sent to MediaWiki; extracts and source URLs are
+# stored in director-plan.json.
+public_research_enabled = false
+research_max_pages = 2
+research_max_chars_per_page = 1200
+research_timeout_seconds = 8
+# If the selected narration-language Wikipedia has too little context, fill the
+# remaining bounded page budget from these public language editions.
+research_fallback_languages = ["en"]
+# Avoid repeating the same public HTTP lookups during retries/re-renders.
+research_cache_ttl_seconds = 3600
+generic_text_temperature = 0.35
+generic_text_max_tokens = 2500
+# Optional extra Prompt Intelligence planning for LOCAL_VIDEO scenes.
+# Forced OFF while local_only=true because current ASC-AI PI is local-first and
+# can fall back to an external provider when local planning fails.
+pi_enrich_video_scenes = false
+pi_resource_mode = "AUTO"
+pi_planning_timeout_seconds = 180
+image_workflow_id = "lustify_krea_v10_native_int8.v1"
+image_model_id = "mdl_diffusion_model_0505412ed2ac"
+image_steps = 8
+image_cfg = 1.0
+video_workflow_id = "wan_i2v_default.v1"
+video_model_id = "mdl_diffusion_model_619a66032c28"
+video_profile = "STANDARD"
+video_duration_seconds = 5
+video_frames = 89
+video_fallback_to_image = true
+generation_timeout_seconds = 1800
+qc_enabled = true
+qc_required = true
+qc_profile = "FAST"
+# "adaptive" registers every still but loads Qwen3-VL only for the first frame,
+# every Nth frame, Character Hub scenes and QC retries. "full" analyzes every
+# still; "structural" skips VLM for stills. Wan video QC always uses VLM.
+qc_image_policy = "adaptive"
+qc_image_vlm_stride = 3
+# Visual Analyzer intentionally observes actual media and does not invent a
+# prompt-similarity score. QC gates on its sealed technical assessment.
+qc_max_image_regenerations = 1
+qc_upload_timeout_seconds = 120
+qc_timeout_seconds = 300
+
+# =============================================================================
 # WebUI Preferences / WebUI 偏好
 # =============================================================================
 
@@ -639,8 +739,9 @@ open_task_folder_on_completion = true
 
 # The WebUI writes the remaining preferences automatically. Uncomment values
 # below only when you want to define initial defaults manually.
-# language = "zh"
-# video_language = ""
+# Russian Edition starts in Russian; the WebUI can change and persist it later.
+language = "ru"
+video_language = "ru-RU"
 # paragraph_number = 1
 # video_script_prompt = ""
 # custom_system_prompt = ""
@@ -654,9 +755,9 @@ open_task_folder_on_completion = true
 # video_clip_duration = 3
 # video_clip_speed = 1.0
 # video_count = 1
-# tts_server = "azure-tts-v1"
-# voice_name = ""
-# voice_mode = "tts"                 # "tts", "upload", or "none"
+tts_server = "chatterbox"
+voice_name = "chatterbox:ru-default"
+voice_mode = "tts"                 # "tts", "upload", or "none"
 # voice_volume = 1.0
 # voice_rate = 1.0
 # bgm_type = "random"

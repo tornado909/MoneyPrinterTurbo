@@ -60,10 +60,17 @@ class _FakeRedis:
     def eval(self, script, numkeys, key, *arguments):
         if isinstance(key, str):
             key = key.encode("utf-8")
-        if key not in self.data:
-            return 0
 
-        target = self.data[key]
+        create_if_absent = 'EXISTS", KEYS[1]) == 1' in script
+        if create_if_absent:
+            if key in self.data:
+                return 0
+            target = self.data.setdefault(key, {})
+        else:
+            if key not in self.data:
+                return 0
+            target = self.data[key]
+
         for index in range(0, len(arguments), 2):
             field = str(arguments[index]).encode("utf-8")
             value = str(arguments[index + 1]).encode("utf-8")
@@ -117,6 +124,55 @@ class TestMemoryState(unittest.TestCase):
         self.assertEqual(total, thread_count * tasks_per_thread)
         self.assertEqual(len(tasks), total)
 
+    def test_memory_lifecycle_updates_preserve_durable_task_metadata(self):
+        state = MemoryState()
+        state.update_task(
+            "task-meta",
+            state=const.TASK_STATE_PROCESSING,
+            progress=0,
+            queue_executor="api",
+            request_fingerprint="fingerprint",
+            retryable=False,
+        )
+        state.update_task(
+            "task-meta",
+            state=const.TASK_STATE_PROCESSING,
+            progress=40,
+            script="generated",
+        )
+        state.update_task(
+            "task-meta",
+            state=const.TASK_STATE_COMPLETE,
+            progress=100,
+            videos=["final.mp4"],
+        )
+
+        task = state.get_task("task-meta")
+        self.assertEqual(task["queue_executor"], "api")
+        self.assertEqual(task["request_fingerprint"], "fingerprint")
+        self.assertFalse(task["retryable"])
+        self.assertEqual(task["script"], "generated")
+        self.assertEqual(task["videos"], ["final.mp4"])
+
+    def test_create_task_if_absent_is_atomic_for_memory_state(self):
+        state = MemoryState()
+
+        self.assertTrue(
+            state.create_task_if_absent(
+                "task-claim",
+                request_fingerprint="first",
+            )
+        )
+        self.assertFalse(
+            state.create_task_if_absent(
+                "task-claim",
+                request_fingerprint="second",
+            )
+        )
+        task = state.get_task("task-claim")
+        self.assertEqual(task["request_fingerprint"], "first")
+        self.assertEqual(task["state"], const.TASK_STATE_PROCESSING)
+
     def test_patch_task_preserves_generated_outputs(self):
         """异步发布更新不能覆盖已经完成的视频任务字段。"""
         state = MemoryState()
@@ -160,6 +216,27 @@ class TestRedisState(unittest.TestCase):
         state = RedisState.__new__(RedisState)
         state._redis = _FakeRedis(batches)
         return state
+
+    def test_json_mode_request_snapshot_survives_redis_literal_roundtrip(self):
+        from app.models.schema import TaskVideoRequest
+
+        snapshot = TaskVideoRequest(
+            video_subject="Теплица",
+            video_aspect="9:16",
+            video_concat_mode="sequential",
+            video_fit_mode="cover",
+            video_source="asc_ai",
+        ).model_dump(mode="json", warnings=False)
+
+        restored = RedisState._convert_to_original_type(
+            str(snapshot).encode("utf-8")
+        )
+
+        self.assertIsInstance(restored, dict)
+        self.assertEqual(restored["video_aspect"], "9:16")
+        self.assertEqual(restored["video_concat_mode"], "sequential")
+        self.assertEqual(restored["video_fit_mode"], "cover")
+        self.assertEqual(restored["video_source"], "asc_ai")
 
     def test_get_all_tasks_paginates_across_scan_batches(self):
         """
@@ -220,6 +297,28 @@ class TestRedisState(unittest.TestCase):
             self.assertNotIn(queue_key, returned_ids)
         finally:
             state._redis.delete(queue_key, *task_ids)
+
+    def test_create_task_if_absent_is_atomic_for_redis_state(self):
+        state = self._build_state([0])
+
+        self.assertTrue(
+            state.create_task_if_absent(
+                "task:new",
+                request_fingerprint="first",
+                queue_executor="api",
+            )
+        )
+        self.assertFalse(
+            state.create_task_if_absent(
+                "task:new",
+                request_fingerprint="second",
+                queue_executor="api",
+            )
+        )
+        task = state.get_task("task:new")
+        self.assertEqual(task["request_fingerprint"], "first")
+        self.assertEqual(task["queue_executor"], "api")
+        self.assertEqual(task["state"], const.TASK_STATE_PROCESSING)
 
     def test_patch_task_updates_only_existing_redis_task(self):
         state = self._build_state([1])

@@ -2,6 +2,7 @@ import json
 import math
 import os
 import re
+import shutil
 import socket
 import threading
 import time
@@ -17,6 +18,7 @@ from app.models import const
 from app.models.schema import VideoConcatMode, VideoParams
 from app.services import bgm as bgm_service
 from app.services import (
+    asc_ai,
     elevenlabs_music,
     llm,
     loomloom,
@@ -529,10 +531,12 @@ def generate_audio(
             return reusable_preview
 
         logger.info("no custom audio file provided, using TTS to generate audio.")
-        audio_file = path.join(utils.task_dir(task_id), "audio.mp3")
+        parsed_voice_name = voice.parse_voice_name(params.voice_name)
+        audio_extension = ".wav" if voice.is_chatterbox_voice(parsed_voice_name) else ".mp3"
+        audio_file = path.join(utils.task_dir(task_id), f"audio{audio_extension}")
         tts_kwargs = {
             "text": video_script,
-            "voice_name": voice.parse_voice_name(params.voice_name),
+            "voice_name": parsed_voice_name,
             "voice_rate": params.voice_rate,
             "voice_file": audio_file,
         }
@@ -632,6 +636,7 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
             audio_file=audio_file,
             subtitle_file=subtitle_path,
             word_level=is_word_level,
+            language=getattr(params, "video_language", None),
         )
         if not is_word_level:
             logger.info("\n\n## correcting subtitle")
@@ -651,7 +656,30 @@ def get_video_materials(
     video_terms,
     audio_duration,
     loomloom_video_request: loomloom.LoomLoomConfirmedVideoRequest | None = None,
+    director_plan: dict | None = None,
+    resume_from_task_id: str = "",
 ):
+    if params.video_source == "asc_ai":
+        if not director_plan:
+            _mark_task_failed(
+                task_id,
+                "materials",
+                "ASC-AI visual generation requires a Director plan",
+            )
+            return None
+        logger.info("\n\n## generating local visual materials with ASC-AI")
+        try:
+            return asc_ai.generate_scene_materials(
+                task_id=task_id,
+                plan=director_plan,
+                audio_duration=audio_duration,
+                aspect=params.video_aspect,
+                clip_duration=params.video_clip_duration,
+                resume_from_task_id=resume_from_task_id,
+            )
+        except asc_ai.AscAIError as exc:
+            _mark_task_failed(task_id, "materials", str(exc))
+            return None
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         materials = video.preprocess_video(
@@ -1373,6 +1401,113 @@ def _schedule_cross_post(
     return None
 
 
+def _retry_source_task_id(task_id: str) -> str:
+    try:
+        state = sm.state.get_task(task_id) or {}
+    except Exception:
+        return ""
+    source = str(state.get("retry_of") or "").strip()
+    return source if source and source != task_id else ""
+
+
+def _copy_retry_task_file(
+    source_task_id: str,
+    target_task_id: str,
+    filename: str,
+) -> str:
+    source_root = path.realpath(utils.task_dir(source_task_id))
+    target_root = path.realpath(utils.task_dir(target_task_id))
+    source = file_security.resolve_path_within_directory(source_root, filename)
+    if not path.isfile(source):
+        return ""
+    target = path.realpath(path.join(target_root, path.basename(filename)))
+    file_security.resolve_path_within_directory(target_root, target)
+    os.makedirs(path.dirname(target), exist_ok=True)
+    if path.exists(target):
+        os.unlink(target)
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+    return target
+
+
+def _retry_audio_available(source_task_id: str) -> bool:
+    if not source_task_id:
+        return False
+    source_root = path.realpath(utils.task_dir(source_task_id))
+    for filename in ("audio.wav", "audio.mp3"):
+        try:
+            source = file_security.resolve_path_within_directory(
+                source_root,
+                filename,
+            )
+        except ValueError:
+            continue
+        if not path.isfile(source):
+            continue
+        duration = voice.get_audio_duration(source)
+        if duration and math.isfinite(duration) and duration > 0:
+            return True
+    return False
+
+
+def _reuse_retry_audio(source_task_id: str, target_task_id: str):
+    for filename in ("audio.wav", "audio.mp3"):
+        try:
+            target = _copy_retry_task_file(
+                source_task_id,
+                target_task_id,
+                filename,
+            )
+        except (OSError, ValueError):
+            continue
+        if not target:
+            continue
+        duration = voice.get_audio_duration(target)
+        if duration and math.isfinite(duration) and duration > 0:
+            logger.info(
+                f"reusing narration audio from interrupted task: "
+                f"source={source_task_id}, target={target_task_id}"
+            )
+            return target, math.ceil(duration), None
+        try:
+            os.unlink(target)
+        except OSError:
+            pass
+    return None
+
+
+def _reuse_retry_subtitle(
+    source_task_id: str,
+    target_task_id: str,
+    *,
+    enabled: bool,
+) -> str:
+    if not enabled:
+        return ""
+    try:
+        target = _copy_retry_task_file(
+            source_task_id,
+            target_task_id,
+            "subtitle.srt",
+        )
+    except (OSError, ValueError):
+        return ""
+    if target and subtitle.file_to_subtitles(target):
+        logger.info(
+            f"reusing subtitles from interrupted task: "
+            f"source={source_task_id}, target={target_task_id}"
+        )
+        return target
+    if target:
+        try:
+            os.unlink(target)
+        except OSError:
+            pass
+    return ""
+
+
 def _run_pipeline(
     task_id,
     params: VideoParams,
@@ -1385,7 +1520,49 @@ def _run_pipeline(
     voxcpm_prompt_text: str = "",
 ):
     logger.info(f"start task: {task_id}, stop_at: {stop_at}")
-    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=5)
+    retry_source_task_id = _retry_source_task_id(task_id)
+    resume_director_plan = None
+    if retry_source_task_id and getattr(params, "director_enabled", False):
+        try:
+            resume_director_plan = asc_ai.load_director_plan(
+                retry_source_task_id
+            )
+            if resume_director_plan:
+                resume_director_plan = asc_ai.sanitize_resumed_plan(
+                    resume_director_plan,
+                    params,
+                )
+        except asc_ai.AscAIError as exc:
+            logger.warning(
+                "saved Director plan cannot be reused; normal planning will run: "
+                f"source={retry_source_task_id}, error={exc}"
+            )
+        if resume_director_plan:
+            requested_script = str(params.video_script or "").strip()
+            resumed_script = str(
+                resume_director_plan.get("script") or ""
+            ).strip()
+            if requested_script and requested_script != resumed_script:
+                resume_director_plan = None
+
+    sm.state.update_task(
+        task_id,
+        state=const.TASK_STATE_PROCESSING,
+        progress=5,
+        resume_from_task=retry_source_task_id or None,
+    )
+
+    try:
+        asc_ai.preflight(
+            params,
+            stop_at=stop_at,
+            director_plan_ready=resume_director_plan is not None,
+            narration_audio_ready=_retry_audio_available(
+                retry_source_task_id
+            ),
+        )
+    except asc_ai.AscAIError as exc:
+        return _mark_task_failed(task_id, "preflight", str(exc))
 
     if (
         stop_at in {"materials", "video"}
@@ -1497,8 +1674,25 @@ def _run_pipeline(
             "in config.toml to a working ffmpeg executable",
         )
 
-    # 1. Generate script
-    video_script = generate_script(task_id, params)
+    # 1. Director / script planning
+    director_plan = None
+    if getattr(params, "director_enabled", False):
+        try:
+            if resume_director_plan is not None:
+                director_plan = resume_director_plan
+            if director_plan is None:
+                director_plan = asc_ai.create_director_plan(params)
+            else:
+                logger.info(
+                    f"reusing Director plan from interrupted task: "
+                    f"source={retry_source_task_id}, target={task_id}"
+                )
+            asc_ai.persist_director_plan(task_id, director_plan)
+            video_script = str(director_plan.get("script") or "").strip()
+        except asc_ai.AscAIError as exc:
+            return _mark_task_failed(task_id, "director", str(exc))
+    else:
+        video_script = generate_script(task_id, params)
     if not video_script or "Error: " in video_script:
         error = (
             video_script.removeprefix("Error: ").strip()
@@ -1515,15 +1709,19 @@ def _run_pipeline(
         )
         return {"script": video_script}
 
-    # 2. Generate terms
+    # 2. Generate terms or reuse Director scene prompts.
     video_terms = ""
     if params.video_source != "local":
-        video_terms = generate_terms(task_id, params, video_script)
+        video_terms = (
+            asc_ai.director_terms(director_plan)
+            if director_plan
+            else generate_terms(task_id, params, video_script)
+        )
         if not video_terms:
             return _mark_task_failed(
                 task_id,
                 "terms",
-                "failed to generate video search terms",
+                "failed to prepare ordered visual prompts",
             )
 
     save_script_data(task_id, video_script, video_terms, params)
@@ -1546,12 +1744,20 @@ def _run_pipeline(
     if voxcpm_prompt_audio is not None:
         generate_audio_kwargs["voxcpm_prompt_audio"] = voxcpm_prompt_audio
         generate_audio_kwargs["voxcpm_prompt_text"] = voxcpm_prompt_text
-    audio_file, audio_duration, sub_maker = generate_audio(
-        task_id,
-        params,
-        video_script,
-        **generate_audio_kwargs,
+    reused_audio = (
+        _reuse_retry_audio(retry_source_task_id, task_id)
+        if retry_source_task_id
+        else None
     )
+    if reused_audio:
+        audio_file, audio_duration, sub_maker = reused_audio
+    else:
+        audio_file, audio_duration, sub_maker = generate_audio(
+            task_id,
+            params,
+            video_script,
+            **generate_audio_kwargs,
+        )
     if not audio_file:
         return _mark_task_failed(
             task_id,
@@ -1571,9 +1777,19 @@ def _run_pipeline(
         return {"audio_file": audio_file, "audio_duration": audio_duration}
 
     # 4. Generate subtitle
-    subtitle_path = generate_subtitle(
-        task_id, params, video_script, sub_maker, audio_file
+    subtitle_path = (
+        _reuse_retry_subtitle(
+            retry_source_task_id,
+            task_id,
+            enabled=bool(params.subtitle_enabled),
+        )
+        if retry_source_task_id
+        else ""
     )
+    if not subtitle_path:
+        subtitle_path = generate_subtitle(
+            task_id, params, video_script, sub_maker, audio_file
+        )
 
     if stop_at == "subtitle":
         sm.state.update_task(
@@ -1586,6 +1802,13 @@ def _run_pipeline(
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
 
+    if director_plan:
+        director_plan = asc_ai.retime_director_plan(
+            director_plan,
+            audio_duration,
+        )
+        asc_ai.persist_execution_plan(task_id, director_plan)
+
     # 5. Get video materials
     downloaded_videos = get_video_materials(
         task_id,
@@ -1593,6 +1816,8 @@ def _run_pipeline(
         video_terms,
         audio_duration,
         loomloom_video_request=loomloom_video_request,
+        director_plan=director_plan,
+        resume_from_task_id=retry_source_task_id,
     )
     if not downloaded_videos:
         return _mark_task_failed(
@@ -1614,7 +1839,25 @@ def _run_pipeline(
 
     # 仅完整视频生成流程才需要处理视频拼接模式；
     # 这样可以避免 /subtitle 和 /audio 这类请求访问不存在的字段。
-    if type(params.video_concat_mode) is str:
+    if director_plan:
+        # ASC-AI materials are already rendered in Director narrative order and
+        # carry their intended duration in each source clip. The generic stock
+        # pipeline's small max_clip_duration would otherwise truncate long
+        # still scenes and random mode could reorder the story.
+        params.video_concat_mode = VideoConcatMode.sequential
+        # Scene clips are already duration-fitted and have Director transitions
+        # baked in. Generic montage speed/transition controls must not alter the
+        # scene timeline a second time.
+        params.video_clip_speed = 1.0
+        params.video_transition_mode = None
+        director_durations = [
+            max(2, min(15, int(scene.get("duration_seconds") or 5)))
+            for scene in (director_plan.get("scenes") or [])
+            if isinstance(scene, dict)
+        ]
+        if director_durations:
+            params.video_clip_duration = max(director_durations)
+    elif type(params.video_concat_mode) is str:
         params.video_concat_mode = VideoConcatMode(params.video_concat_mode)
 
     # 6. Generate final videos

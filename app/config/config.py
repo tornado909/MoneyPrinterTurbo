@@ -501,6 +501,7 @@ def save_config():
         config_to_save["fish_audio"] = dict(fish_audio)
         config_to_save["voxcpm"] = dict(voxcpm)
         config_to_save["ui"] = dict(ui)
+        config_to_save["asc_ai"] = dict(asc_ai)
         serialized_config = toml.dumps(config_to_save)
 
         # WebUI 完整 rerun 结束时会调用保存。内容没有变化时直接返回，避免每次
@@ -558,6 +559,7 @@ chatterbox = _SynchronizedConfig(_cfg.get("chatterbox", {}))
 kokoro = _SynchronizedConfig(_cfg.get("kokoro", {}))
 fish_audio = _SynchronizedConfig(_cfg.get("fish_audio", {}))
 voxcpm = _SynchronizedConfig(_cfg.get("voxcpm", {}))
+asc_ai = _SynchronizedConfig(_cfg.get("asc_ai", {}))
 ui = _SynchronizedConfig(
     _cfg.get(
         "ui",
@@ -580,6 +582,9 @@ project_description = _cfg.get(
 project_version = _cfg.get("project_version", __version__)
 reload_debug = False
 
+_redis_enabled_env = os.getenv("MPT_APP_ENABLE_REDIS", "").strip().lower()
+if _redis_enabled_env:
+    app["enable_redis"] = _redis_enabled_env in {"1", "true", "yes", "on"}
 app["redis_host"] = os.getenv(
     "MPT_APP_REDIS_HOST",
     os.getenv("REDIS_HOST", app.get("redis_host", "localhost")),
