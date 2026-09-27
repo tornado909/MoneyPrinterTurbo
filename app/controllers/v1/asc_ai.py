@@ -343,11 +343,11 @@ def retry_production(request: Request, task_id: str):
             detail="task is not marked retryable",
         )
 
-    raw_params = previous.get("params")
+    raw_params = previous.get("request_params")
     if not isinstance(raw_params, dict):
         raise HTTPException(
             status_code=409,
-            detail="retryable task has no reusable parameter snapshot",
+            detail="retryable task has no durable request parameter snapshot",
         )
     if str(raw_params.get("video_source") or "") != "asc_ai":
         raise HTTPException(
