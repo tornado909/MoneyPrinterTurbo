@@ -5280,6 +5280,64 @@ def _render_video_settings(panel, params):
                 st.caption(tr("ASC-AI Director Help"))
 
                 with st.expander(tr("Director Settings"), expanded=True):
+                    egress_research_col, egress_media_col = st.columns(2)
+                    with egress_research_col:
+                        params.director_public_research_enabled = st.checkbox(
+                            tr("Director Public Research"),
+                            value=bool(
+                                config.ui.get(
+                                    "director_public_research_enabled",
+                                    config.asc_ai.get(
+                                        "public_research_enabled",
+                                        False,
+                                    ),
+                                )
+                            ),
+                            key="director_public_research_enabled",
+                            help=tr("Director Public Research Help"),
+                        )
+                    with egress_media_col:
+                        params.director_public_media_enabled = st.checkbox(
+                            tr("Director Public Media"),
+                            value=bool(
+                                config.ui.get(
+                                    "director_public_media_enabled",
+                                    config.asc_ai.get(
+                                        "public_media_enabled",
+                                        False,
+                                    ),
+                                )
+                            ),
+                            key="director_public_media_enabled",
+                            help=tr("Director Public Media Help"),
+                        )
+                    if (
+                        params.director_public_research_enabled
+                        or params.director_public_media_enabled
+                    ):
+                        st.warning(tr("Director Public Egress Warning"))
+
+                    _set_runtime_config(
+                        "ui",
+                        "director_public_research_enabled",
+                        params.director_public_research_enabled,
+                    )
+                    _set_runtime_config(
+                        "ui",
+                        "director_public_media_enabled",
+                        params.director_public_media_enabled,
+                    )
+                    _set_runtime_config(
+                        "asc_ai",
+                        "public_research_enabled",
+                        params.director_public_research_enabled,
+                    )
+                    _set_runtime_config(
+                        "asc_ai",
+                        "public_media_enabled",
+                        params.director_public_media_enabled,
+                    )
+
                     duration_col, video_scene_col, public_scene_col = st.columns(3)
                     with duration_col:
                         params.director_target_duration_seconds = int(
@@ -5334,6 +5392,7 @@ def _render_video_settings(panel, params):
                                 step=1,
                                 key="director_max_public_image_scenes",
                                 help=tr("Director Public Image Scenes Help"),
+                                disabled=not params.director_public_media_enabled,
                             )
                         )
 
@@ -5464,20 +5523,6 @@ def _render_video_settings(panel, params):
                     )
                     _set_runtime_config(
                         "ui", "director_purpose", params.director_purpose
-                    )
-
-                    public_research_enabled = st.checkbox(
-                        tr("Director Public Research"),
-                        value=bool(
-                            config.asc_ai.get("public_research_enabled", True)
-                        ),
-                        key="director_public_research_enabled",
-                        help=tr("Director Public Research Help"),
-                    )
-                    _set_runtime_config(
-                        "asc_ai",
-                        "public_research_enabled",
-                        public_research_enabled,
                     )
 
                     if st.button(
