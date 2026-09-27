@@ -15,6 +15,15 @@ MoneyPrinterTurbo используется как production/editor слой, а
 9. Не прошедшее технический QC изображение получает новый idempotency key и реально перегенерируется. Перед Wan enqueue проверяется совместимость aspect ratio; несовместимая вертикальная сцена сразу уходит в still fallback без расхода GPU.
 10. MoneyPrinterTurbo собирает ролик MoviePy/FFmpeg, делает локальную озвучку и локальные Whisper-субтитры.
 
+## Cost-aware public egress
+
+В ASC-AI профиле по умолчанию включены два бесплатных non-AI источника:
+
+- MediaWiki для bounded factual grounding;
+- Wikimedia Commons для максимум двух factual still-сцен по умолчанию.
+
+Commons используется только для подходящих reusable лицензий, сохраняет attribution/credits и при любой ошибке или отклонении QC уходит в локальную генерацию. Для приватных корпоративных тем оба вида egress отключаются независимо на уровне task/WebUI.
+
 ## Local-only policy
 
 При `asc_ai.local_only = true` production-путь работает fail-closed. По умолчанию это также **zero-public-egress**:
