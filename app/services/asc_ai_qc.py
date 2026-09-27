@@ -40,6 +40,7 @@ def register_artifact(
     if not is_video:
         data["role"] = "generated_output"
     mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    response = None
     try:
         with path.open("rb") as handle:
             response = requests.post(
@@ -50,12 +51,31 @@ def register_artifact(
             )
         response.raise_for_status()
         result = response.json()
+    except requests.HTTPError as exc:
+        status = getattr(response, "status_code", None)
+        body = ""
+        if response is not None:
+            try:
+                body = str(response.text or "").strip()
+            except Exception:
+                body = ""
+        if len(body) > 600:
+            body = body[:600] + "..."
+        detail = f"HTTP {status}" if status is not None else "HTTP error"
+        if body:
+            detail += f": {body}"
+        raise QCError(
+            f"ASC-AI QC artifact registration failed at {endpoint}: {detail}"
+        ) from exc
     except requests.RequestException as exc:
         raise QCError(
-            f"ASC-AI QC artifact registration failed: {type(exc).__name__}"
+            f"ASC-AI QC artifact registration failed at {endpoint}: "
+            f"{type(exc).__name__}: {exc}"
         ) from exc
     except ValueError as exc:
-        raise QCError("ASC-AI QC artifact registration returned invalid JSON") from exc
+        raise QCError(
+            f"ASC-AI QC artifact registration returned invalid JSON at {endpoint}"
+        ) from exc
     if not isinstance(result, dict) or not result.get("artifact_id"):
         raise QCError("ASC-AI QC artifact registration returned no artifact_id")
     return result
@@ -68,9 +88,11 @@ def analyze_evidence(
     profile: str = "FAST",
     timeout: float = 300.0,
 ) -> dict:
+    endpoint = "/api/v1/evidence/analyze"
+    response = None
     try:
         response = requests.post(
-            visual_url.rstrip("/") + "/api/v1/evidence/analyze",
+            visual_url.rstrip("/") + endpoint,
             json={
                 "artifact_id": artifact_id,
                 "profile": profile,
@@ -80,10 +102,31 @@ def analyze_evidence(
         )
         response.raise_for_status()
         result = response.json()
+    except requests.HTTPError as exc:
+        status = getattr(response, "status_code", None)
+        body = ""
+        if response is not None:
+            try:
+                body = str(response.text or "").strip()
+            except Exception:
+                body = ""
+        if len(body) > 600:
+            body = body[:600] + "..."
+        detail = f"HTTP {status}" if status is not None else "HTTP error"
+        if body:
+            detail += f": {body}"
+        raise QCError(
+            f"ASC-AI evidence analysis failed at {endpoint}: {detail}"
+        ) from exc
     except requests.RequestException as exc:
-        raise QCError(f"ASC-AI evidence analysis failed: {type(exc).__name__}") from exc
+        raise QCError(
+            f"ASC-AI evidence analysis failed at {endpoint}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
     except ValueError as exc:
-        raise QCError("ASC-AI evidence analysis returned invalid JSON") from exc
+        raise QCError(
+            f"ASC-AI evidence analysis returned invalid JSON at {endpoint}"
+        ) from exc
     if not isinstance(result, dict):
         raise QCError("ASC-AI evidence analysis returned a non-object response")
     if result.get("external_egress") is not False:
