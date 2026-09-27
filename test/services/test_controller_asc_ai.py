@@ -166,6 +166,153 @@ class TestAscAIController(unittest.TestCase):
         create_task.assert_not_called()
         preflight.assert_called_once()
 
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    @patch.object(
+        asc_ai_controller,
+        "_production_fingerprint",
+        return_value="fingerprint-1",
+    )
+    def test_production_idempotency_claims_deterministic_task_once(
+        self, _fingerprint, preflight, create_task
+    ):
+        key = "agent-run-0001"
+        expected_task_id = asc_ai_controller._production_task_id(key)
+
+        def create_response(_request, _body, _stop_at, **kwargs):
+            return {
+                "status": 200,
+                "data": {"task_id": kwargs["task_id_override"]},
+            }
+
+        create_task.side_effect = create_response
+        with patch.object(asc_ai_controller.sm, "state") as state:
+            state.get_task.return_value = None
+            state.create_task_if_absent.return_value = True
+            response = self.client.post(
+                "/api/v1/asc-ai/production",
+                headers={"Idempotency-Key": key},
+                json={"video_subject": "Теплица"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["task_id"], expected_task_id)
+        preflight.assert_called_once()
+        state.create_task_if_absent.assert_called_once()
+        claim = state.create_task_if_absent.call_args
+        self.assertEqual(claim.args[0], expected_task_id)
+        self.assertEqual(claim.kwargs["request_fingerprint"], "fingerprint-1")
+        self.assertEqual(claim.kwargs["idempotency_scope"], "asc-ai-production")
+        create_task.assert_called_once()
+        self.assertEqual(
+            create_task.call_args.kwargs["task_id_override"],
+            expected_task_id,
+        )
+        self.assertTrue(create_task.call_args.kwargs["initial_state_claimed"])
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    @patch.object(
+        asc_ai_controller,
+        "_production_fingerprint",
+        return_value="fingerprint-1",
+    )
+    def test_production_idempotent_replay_skips_preflight_and_render_queue(
+        self, _fingerprint, preflight, create_task
+    ):
+        key = "agent-run-0002"
+        task_id = asc_ai_controller._production_task_id(key)
+        with patch.object(asc_ai_controller.sm, "state") as state:
+            state.get_task.return_value = {
+                "task_id": task_id,
+                "request_fingerprint": "fingerprint-1",
+                "state": 4,
+            }
+            response = self.client.post(
+                "/api/v1/asc-ai/production",
+                headers={"Idempotency-Key": key},
+                json={"video_subject": "Теплица"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["task_id"], task_id)
+        preflight.assert_not_called()
+        create_task.assert_not_called()
+        state.create_task_if_absent.assert_not_called()
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    @patch.object(
+        asc_ai_controller,
+        "_production_fingerprint",
+        return_value="fingerprint-new",
+    )
+    def test_production_idempotency_rejects_key_reuse_for_different_payload(
+        self, _fingerprint, preflight, create_task
+    ):
+        key = "agent-run-0003"
+        with patch.object(asc_ai_controller.sm, "state") as state:
+            state.get_task.return_value = {
+                "task_id": asc_ai_controller._production_task_id(key),
+                "request_fingerprint": "fingerprint-old",
+            }
+            response = self.client.post(
+                "/api/v1/asc-ai/production",
+                headers={"Idempotency-Key": key},
+                json={"video_subject": "Другая тема"},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        preflight.assert_not_called()
+        create_task.assert_not_called()
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    @patch.object(
+        asc_ai_controller,
+        "_production_fingerprint",
+        return_value="fingerprint-1",
+    )
+    def test_production_idempotency_lost_claim_race_becomes_replay(
+        self, _fingerprint, preflight, create_task
+    ):
+        key = "agent-run-0004"
+        task_id = asc_ai_controller._production_task_id(key)
+        with patch.object(asc_ai_controller.sm, "state") as state:
+            state.get_task.side_effect = [
+                None,
+                {
+                    "task_id": task_id,
+                    "request_fingerprint": "fingerprint-1",
+                    "state": 4,
+                },
+            ]
+            state.create_task_if_absent.return_value = False
+            response = self.client.post(
+                "/api/v1/asc-ai/production",
+                headers={"Idempotency-Key": key},
+                json={"video_subject": "Теплица"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["task_id"], task_id)
+        preflight.assert_called_once()
+        create_task.assert_not_called()
+
+    @patch.object(asc_ai_controller.video_controller, "create_task")
+    @patch.object(asc_ai_controller.asc_ai, "preflight")
+    def test_production_rejects_invalid_idempotency_key_before_preflight(
+        self, preflight, create_task
+    ):
+        response = self.client.post(
+            "/api/v1/asc-ai/production",
+            headers={"Idempotency-Key": "bad key"},
+            json={"video_subject": "Теплица"},
+        )
+        self.assertEqual(response.status_code, 400)
+        preflight.assert_not_called()
+        create_task.assert_not_called()
+
     def test_production_request_rejects_preset_without_local_filename(self):
         response = self.client.post(
             "/api/v1/asc-ai/production",
