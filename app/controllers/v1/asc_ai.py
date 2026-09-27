@@ -241,6 +241,7 @@ def capabilities(request: Request):
                 "director_plan": "director-plan.json",
                 "director_execution_plan": "director-execution-plan.json",
                 "production_manifest": "production-manifest.json",
+                "final_qc": "final-qc.json",
                 "public_media_credits": "public-media-credits.json",
             },
         },
@@ -394,6 +395,7 @@ def production_evidence(request: Request, task_id: str):
         "director_plan": "director-plan.json",
         "director_execution_plan": "director-execution-plan.json",
         "production_manifest": "production-manifest.json",
+        "final_qc": "final-qc.json",
         "public_media_credits": "public-media-credits.json",
     }
     artifacts = {
