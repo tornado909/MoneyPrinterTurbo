@@ -590,6 +590,9 @@
     "No Director Character": "Без персонажа Character Hub",
     "Director Character Help": "Необязательно. Выберите персонажа Character Hub, чтобы сохранять одну и ту же внешность между сценами. Если manifest содержит canonical reference artifacts/LoRA, они используются автоматически.",
     "Director Character Summary": "{name} · {kind} · референсов: {refs} · LoRA: {loras}",
-    "Character Hub Unavailable": "Character Hub недоступен: {error}"
+    "Character Hub Unavailable": "Character Hub недоступен: {error}",
+    "Local AI Runtime": "Локальный AI Runtime",
+    "Local AI Runtime Help": "Включён строгий local-only режим. Вся генерация текста идёт в локальный Qwen через GPU Scheduler ASC-AI; ключи облачных LLM не используются.",
+    "Local AI Scheduler Help": "Допуск к GPU и жизненный цикл модели контролирует ASC-AI Scheduler: {scheduler}"
   }
 }
