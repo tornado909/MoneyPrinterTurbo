@@ -730,6 +730,13 @@ qc_image_vlm_stride = 3
 qc_max_image_regenerations = 1
 qc_upload_timeout_seconds = 120
 qc_timeout_seconds = 300
+# Final assembled-video QA. Structural validation is CPU-only; the optional
+# Visual Analyzer pass is one local VLM job per final output and never triggers
+# an automatic re-render. Required=true keeps obviously broken final files from
+# being reported as successful while preserving them for diagnostics.
+final_qc_enabled = true
+final_qc_required = true
+final_qc_visual_analysis = true
 
 # =============================================================================
 # WebUI Preferences / WebUI 偏好
