@@ -133,39 +133,43 @@ def recover_interrupted_webui_tasks() -> list[str]:
     The WebUI queue is intentionally in-memory because it can carry ephemeral
     preview bytes that must never be persisted. Redis still stores task status,
     so a process restart must explicitly close stale processing records.
+
+    The completion guard is committed only after a successful scan. A temporary
+    Redis failure therefore remains retryable on the next Streamlit rerun.
     """
     global _startup_recovery_done
     with _startup_recovery_lock:
         if _startup_recovery_done:
             return []
-        _startup_recovery_done = True
 
-    recovered: list[str] = []
-    page = 1
-    page_size = 200
-    while True:
-        tasks, total = sm.state.get_all_tasks(page, page_size)
-        for task in tasks:
-            if (
-                task.get("queue_executor") == "webui"
-                and task.get("state") == const.TASK_STATE_PROCESSING
-            ):
-                task_id = str(task.get("task_id") or "").strip()
-                if task_id and sm.state.patch_task(
-                    task_id,
-                    state=const.TASK_STATE_FAILED,
-                    failed_stage="webui_startup_recovery",
-                    error=(
-                        "WebUI process restarted while this task was running; "
-                        "ephemeral WebUI queue payload cannot be replayed safely"
-                    ),
-                    retryable=True,
-                    recovery_action="resubmit",
+        recovered: list[str] = []
+        page = 1
+        page_size = 200
+        while True:
+            tasks, total = sm.state.get_all_tasks(page, page_size)
+            for task in tasks:
+                if (
+                    task.get("queue_executor") == "webui"
+                    and task.get("state") == const.TASK_STATE_PROCESSING
                 ):
-                    recovered.append(task_id)
-        if page * page_size >= total:
-            break
-        page += 1
+                    task_id = str(task.get("task_id") or "").strip()
+                    if task_id and sm.state.patch_task(
+                        task_id,
+                        state=const.TASK_STATE_FAILED,
+                        failed_stage="webui_startup_recovery",
+                        error=(
+                            "WebUI process restarted while this task was running; "
+                            "ephemeral WebUI queue payload cannot be replayed safely"
+                        ),
+                        retryable=True,
+                        recovery_action="resubmit",
+                    ):
+                        recovered.append(task_id)
+            if page * page_size >= total:
+                break
+            page += 1
+
+        _startup_recovery_done = True
 
     if recovered:
         logger.warning(
