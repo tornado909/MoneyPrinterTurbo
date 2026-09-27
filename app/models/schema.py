@@ -120,6 +120,7 @@ class VideoParams(BaseModel):
     director_enabled: bool = True
     director_target_duration_seconds: int = Field(default=45, ge=5, le=300)
     director_max_local_video_scenes: int = Field(default=1, ge=0, le=6)
+    director_max_public_image_scenes: int = Field(default=2, ge=0, le=6)
     director_style: str = Field(default="", max_length=2000)
     director_audience: str = Field(default="", max_length=1000)
     director_purpose: str = Field(default="", max_length=1000)
