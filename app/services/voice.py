@@ -227,9 +227,6 @@ def get_chatterbox_voices() -> list[str]:
         if not v:
             continue
         result.append(v if v.startswith("chatterbox:") else f"chatterbox:{v}")
-    if not result:
-        # keep the dropdown usable even before any voice is configured
-        result = ["chatterbox:ru-default"]
     return result
 
 
@@ -2265,6 +2262,45 @@ def chatterbox_tts(
     api_key = config.chatterbox.get("api_key", "")
     if not model_id:
         model_id = config.chatterbox.get("model_id", "tts-1") or "tts-1"
+
+    # The pinned Chatterbox API silently falls back to its built-in English
+    # sample when an unknown voice name is requested. Refuse that behaviour:
+    # a missing Russian voice otherwise produces Russian text with an English
+    # accent while the request still returns HTTP 200.
+    try:
+        catalog = requests.get(f"{base_url}/voices", timeout=5)
+        catalog.raise_for_status()
+        rows = (catalog.json() or {}).get("voices") or []
+        selected = next(
+            (
+                row
+                for row in rows
+                if row.get("name") == voice or voice in (row.get("aliases") or [])
+            ),
+            None,
+        )
+    except Exception as exc:
+        logger.error(
+            f"Chatterbox voice catalog unavailable: {type(exc).__name__}"
+        )
+        return None
+
+    if not selected:
+        logger.error(
+            f"Chatterbox voice '{voice}' is not registered; refusing silent English fallback"
+        )
+        return None
+
+    language = str(
+        selected.get("language")
+        or (selected.get("metadata") or {}).get("language")
+        or ""
+    ).strip().lower()
+    if voice.startswith("ru-") and language != "ru":
+        logger.error(
+            f"Chatterbox voice '{voice}' is not registered with language=ru"
+        )
+        return None
 
     return _openai_compatible_tts(
         "chatterbox", base_url, api_key, model_id, voice, text, voice_rate, voice_file
