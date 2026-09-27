@@ -894,9 +894,9 @@ def generate_video_from_image(
         )
     visual = str(scene.get("visual_prompt") or "").strip()
     combined_prompt = f"{visual}. Motion: {prompt}" if visual else prompt
-    duration = int(scene.get("duration_seconds") or _setting("video_duration_seconds", 5))
-    if duration not in {3, 5}:
-        duration = 5
+    # Keep the GPU job on the validated ASC-AI production baseline. Director
+    # timing is applied afterwards by local deterministic editing.
+    duration = 5
     payload = {
         "workflow_id": str(binding["workflow_id"]),
         "model_id": str(binding["model_id"]),
@@ -1283,6 +1283,9 @@ def generate_scene_materials(
             if scene.get("visual_strategy") == "LOCAL_VIDEO":
                 video_record = {
                     "candidate_path": None,
+                    "timed_path": None,
+                    "native_contract_seconds": 5,
+                    "requested_scene_seconds": requested_scene_seconds,
                     "qc": None,
                     "error": None,
                     "capability": (
@@ -1333,12 +1336,17 @@ def generate_scene_materials(
                         )
                         video_record["qc"] = video_qc
                         if video_qc.get("passed"):
-                            output_path = candidate_video
-                            effective_scene_seconds = int(
-                                working_scene.get("duration_seconds") or 5
+                            timed_video = video.fit_director_video_duration(
+                                candidate_video,
+                                image_path,
+                                requested_scene_seconds,
                             )
-                            if effective_scene_seconds not in {3, 5}:
-                                effective_scene_seconds = 5
+                            video_record["timed_path"] = timed_video
+                            video_record["timing_adjusted"] = (
+                                timed_video != candidate_video
+                            )
+                            output_path = timed_video
+                            effective_scene_seconds = requested_scene_seconds
                         else:
                             scene_record["fallback"] = "video_qc_failed"
                             logger.warning(
