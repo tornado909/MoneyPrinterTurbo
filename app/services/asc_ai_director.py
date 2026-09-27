@@ -28,8 +28,16 @@ class DirectorSceneCandidate(BaseModel):
     visual_strategy: Literal["LOCAL_IMAGE", "LOCAL_VIDEO"] = "LOCAL_IMAGE"
     visual_prompt: str = Field(min_length=1, max_length=6000)
     motion_prompt: str = Field(default="", max_length=3000)
-    transition: str = Field(default="cut", max_length=100)
-    overlay_text: str = Field(default="", max_length=1000)
+    transition: Literal[
+        "cut",
+        "fade_in",
+        "fade_out",
+        "slide_in",
+        "slide_out",
+        "zoom_in",
+        "zoom_out",
+    ] = "cut"
+    overlay_text: str = Field(default="", max_length=160)
 
 
 class DirectorPlanCandidate(BaseModel):
@@ -472,7 +480,8 @@ Return one JSON object with:
 - script: narration in the requested language;
 - scenes: ordered array with scene_id, narration, duration_seconds,
   visual_strategy (LOCAL_IMAGE or LOCAL_VIDEO), visual_prompt, motion_prompt,
-  transition and overlay_text;
+  transition (cut, fade_in, fade_out, slide_in, slide_out, zoom_in or zoom_out)
+  and a short overlay_text callout;
 - production_notes: short array of global consistency rules.
 
 Visual prompts must be descriptive English prompts suitable for local
@@ -480,7 +489,9 @@ Krea/Lustify generation. Use LOCAL_VIDEO only when motion materially improves st
 LOCAL_VIDEO scene must use duration_seconds=5 because the local Wan production
 profile renders native five-second clips. Preserve character/object/environment
 continuity across scenes.
-Never request generated text, logos or watermarks inside imagery.
+Never request generated text, logos or watermarks inside imagery. Keep
+overlay_text empty unless a short on-screen callout materially improves the
+scene; when used, keep it concise (roughly 2-6 words) in the narration language.
 """.strip()
     runtime = SchedulerManagedLocalLLM(
         scheduler_url,
