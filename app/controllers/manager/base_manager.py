@@ -110,11 +110,10 @@ class TaskManager:
             ):
                 task_info = self.dequeue()
                 if task_info is None:
-                    # dequeue() may discard stale entries. If nothing usable is
-                    # left, stop instead of spinning while the queue changes.
-                    if self.is_queue_empty():
-                        break
-                    continue
+                    # dequeue() may discard stale entries and then report that
+                    # no dispatchable work remains. Stop this drain cycle;
+                    # startup recovery or the next task completion will retry.
+                    break
                 func = task_info["func"]
                 args = task_info.get("args", ())
                 kwargs = task_info.get("kwargs", {})
