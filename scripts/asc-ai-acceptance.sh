@@ -141,10 +141,10 @@ while :; do
   state="$(json_value "$TMP_DIR/task.json" "data.state")"
   progress="$(json_value "$TMP_DIR/task.json" "data.progress")"
   echo "  state=$state progress=$progress%"
-  if [[ "$state" == "4" ]]; then
+  if [[ "$state" == "1" ]]; then
     break
   fi
-  if [[ "$state" == "3" ]]; then
+  if [[ "$state" == "-1" ]]; then
     cat "$TMP_DIR/task.json" >&2
     fail "production task failed"
   fi
