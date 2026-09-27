@@ -231,7 +231,7 @@ def create_task(
                 task_id,
                 queue_executor="api",
                 retryable=False,
-                request_params=body.model_dump(warnings=False),
+                request_params=body.model_dump(mode="json", warnings=False),
                 request_stop_at=stop_at,
                 **dict(state_metadata or {}),
             )
