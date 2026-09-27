@@ -1162,6 +1162,7 @@ def generate_scene_materials(
         raise AscAIError("Director plan has no scenes")
 
     paths: list[str] = []
+    used_public_media: list[dict] = []
     covered = 0.0
     required = max(float(audio_duration or 0), 0.1)
     clip_seconds = max(1, int(clip_duration or 5))
@@ -1236,6 +1237,7 @@ def generate_scene_materials(
                     "model_id": scene_binding.get("model_id"),
                     "resolution": f"{scene_width}x{scene_height}",
                 },
+                "public_media": None,
                 "image_attempts": [],
                 "video": None,
                 "fallback": None,
@@ -1246,57 +1248,120 @@ def generate_scene_materials(
 
             image_path = ""
             image_qc = None
-            max_regenerations = max(
-                0, int(_setting("qc_max_image_regenerations", 1))
-            )
-            for attempt in range(max_regenerations + 1):
-                image_result = generate_image(
-                    task_id,
-                    working_scene,
-                    aspect,
-                    attempt=attempt + 1,
-                    binding=scene_binding,
-                    return_execution=True,
-                )
-                if isinstance(image_result, tuple):
-                    image_path, image_execution = image_result
-                else:
-                    image_path, image_execution = image_result, None
-                run_image_vlm = _image_vlm_required(
-                    scene_index,
-                    attempt,
-                    working_scene,
-                )
-                image_qc = quality_control(
-                    task_id,
-                    working_scene,
-                    image_path,
-                    media_kind="image",
-                    run_visual_analysis=run_image_vlm,
-                )
-                scene_record["image_attempts"].append(
-                    {
-                        "attempt": attempt + 1,
-                        "path": image_path,
-                        "prompt": working_scene.get("visual_prompt"),
-                        "qc": image_qc,
-                        "execution": image_execution,
-                    }
-                )
-                persist_production_manifest(task_id, manifest)
-                if image_qc.get("passed"):
-                    break
-                if attempt < max_regenerations:
-                    retry_prompt = str(
-                        image_qc.get("retry_prompt") or ""
-                    ).strip()
-                    if retry_prompt:
-                        working_scene["visual_prompt"] = retry_prompt
-                    logger.warning(
-                        "ASC-AI image QC requested one local regeneration: "
-                        f"scene={scene.get('scene_id')}, "
-                        f"technical={image_qc.get('technical_score')}"
+            image_source = "local_generation"
+            selected_public_media = None
+
+            if scene.get("visual_strategy") == "PUBLIC_IMAGE":
+                try:
+                    public_result = acquire_public_scene_image(
+                        task_id,
+                        working_scene,
+                        aspect,
                     )
+                    image_path = str(public_result["path"])
+                    image_source = "wikimedia_commons"
+                    selected_public_media = dict(public_result)
+                    scene_record["public_media"] = {
+                        key: value
+                        for key, value in public_result.items()
+                        if key not in {"cache_path"}
+                    }
+                    run_image_vlm = _image_vlm_required(
+                        scene_index,
+                        0,
+                        working_scene,
+                    )
+                    image_qc = quality_control(
+                        task_id,
+                        working_scene,
+                        image_path,
+                        media_kind="image",
+                        run_visual_analysis=run_image_vlm,
+                    )
+                    scene_record["image_attempts"].append(
+                        {
+                            "attempt": 1,
+                            "source": image_source,
+                            "path": image_path,
+                            "query": working_scene.get("public_media_query"),
+                            "prompt": working_scene.get("visual_prompt"),
+                            "qc": image_qc,
+                            "execution": None,
+                        }
+                    )
+                    if not image_qc.get("passed"):
+                        scene_record["fallback"] = "public_media_qc_failed"
+                        image_path = ""
+                        selected_public_media = None
+                except Exception as exc:
+                    scene_record["fallback"] = "public_media_unavailable"
+                    scene_record["public_media"] = {
+                        "query": working_scene.get("public_media_query"),
+                        "error": f"{type(exc).__name__}: {str(exc)[:500]}",
+                    }
+                    image_path = ""
+                    selected_public_media = None
+                    logger.info(
+                        "ASC-AI public media unavailable; falling back to local "
+                        f"image generation: scene={scene.get('scene_id')}, "
+                        f"error={type(exc).__name__}"
+                    )
+                persist_production_manifest(task_id, manifest)
+
+            if not image_path:
+                image_source = "local_generation"
+                max_regenerations = max(
+                    0, int(_setting("qc_max_image_regenerations", 1))
+                )
+                for attempt in range(max_regenerations + 1):
+                    image_result = generate_image(
+                        task_id,
+                        working_scene,
+                        aspect,
+                        attempt=attempt + 1,
+                        binding=scene_binding,
+                        return_execution=True,
+                    )
+                    if isinstance(image_result, tuple):
+                        image_path, image_execution = image_result
+                    else:
+                        image_path, image_execution = image_result, None
+                    run_image_vlm = _image_vlm_required(
+                        scene_index,
+                        attempt,
+                        working_scene,
+                    )
+                    image_qc = quality_control(
+                        task_id,
+                        working_scene,
+                        image_path,
+                        media_kind="image",
+                        run_visual_analysis=run_image_vlm,
+                    )
+                    scene_record["image_attempts"].append(
+                        {
+                            "attempt": attempt + 1,
+                            "source": image_source,
+                            "path": image_path,
+                            "prompt": working_scene.get("visual_prompt"),
+                            "qc": image_qc,
+                            "execution": image_execution,
+                        }
+                    )
+                    persist_production_manifest(task_id, manifest)
+                    if image_qc.get("passed"):
+                        break
+                    if attempt < max_regenerations:
+                        retry_prompt = str(
+                            image_qc.get("retry_prompt") or ""
+                        ).strip()
+                        if retry_prompt:
+                            working_scene["visual_prompt"] = retry_prompt
+                        logger.warning(
+                            "ASC-AI image QC requested one local regeneration: "
+                            f"scene={scene.get('scene_id')}, "
+                            f"technical={image_qc.get('technical_score')}"
+                        )
 
             if not image_qc or not image_qc.get("passed"):
                 if bool(_setting("qc_required", True)):
@@ -1471,6 +1536,9 @@ def generate_scene_materials(
 
             scene_record["final_output"] = output_path
             scene_record["effective_duration_seconds"] = effective_scene_seconds
+            scene_record["image_source"] = image_source
+            if selected_public_media is not None and image_source == "wikimedia_commons":
+                used_public_media.append(selected_public_media)
             paths.append(output_path)
             manifest["outputs"] = list(paths)
             covered += effective_scene_seconds
@@ -1485,6 +1553,16 @@ def generate_scene_materials(
 
         manifest["status"] = "complete"
         manifest["covered_seconds"] = covered
+        if used_public_media:
+            credits_json, credits_text = public_media.write_credits(
+                utils.task_dir(task_id),
+                used_public_media,
+            )
+            manifest["public_media_credits"] = {
+                "json": credits_json,
+                "text": credits_text,
+                "count": len(used_public_media),
+            }
         persist_production_manifest(task_id, manifest)
         return paths
     except Exception as exc:
