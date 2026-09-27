@@ -203,8 +203,12 @@ def create_task(
     request: Request,
     body: Union[TaskVideoRequest, SubtitleRequest, AudioRequest],
     stop_at: str,
+    *,
+    task_id_override: str | None = None,
+    initial_state_claimed: bool = False,
+    state_metadata: dict | None = None,
 ):
-    task_id = utils.get_uuid()
+    task_id = task_id_override or utils.get_uuid()
     request_id = base.get_task_id(request)
     try:
         if (
@@ -222,11 +226,13 @@ def create_task(
             "request_id": request_id,
             "params": body.model_dump(),
         }
-        sm.state.update_task(
-            task_id,
-            queue_executor="api",
-            retryable=False,
-        )
+        if not initial_state_claimed:
+            sm.state.update_task(
+                task_id,
+                queue_executor="api",
+                retryable=False,
+                **dict(state_metadata or {}),
+            )
         try:
             task_manager.add_task(
                 tm.start, task_id=task_id, params=body, stop_at=stop_at
@@ -247,6 +253,8 @@ def create_task(
             task_id=task_id, status_code=429, message=f"{request_id}: {str(e)}"
         )
     except ValueError as e:
+        if initial_state_claimed:
+            sm.state.delete_task(task_id)
         raise HttpException(
             task_id=task_id, status_code=400, message=f"{request_id}: {str(e)}"
         )
