@@ -302,7 +302,12 @@ def _extract_object(text: str) -> dict:
     return result
 
 
-def _normalize(raw: dict, params) -> dict:
+def _normalize(
+    raw: dict,
+    params,
+    *,
+    public_media_enabled: bool = True,
+) -> dict:
     supplied_script = str(params.video_script or "").strip()
     if supplied_script:
         raw = dict(raw)
@@ -334,8 +339,10 @@ def _normalize(raw: dict, params) -> dict:
     max_video = max(
         0, int(getattr(params, "director_max_local_video_scenes", 1))
     )
-    max_public = max(
-        0, int(getattr(params, "director_max_public_image_scenes", 2))
+    max_public = (
+        max(0, int(getattr(params, "director_max_public_image_scenes", 2)))
+        if public_media_enabled
+        else 0
     )
     used_video = 0
     used_public = 0
@@ -552,7 +559,13 @@ scene; when used, keep it concise (roughly 2-6 words) in the narration language.
             previous_output = text
             raw = _extract_object(text)
             raw["research"] = research_items
-            return _normalize(raw, params)
+            return _normalize(
+                raw,
+                params,
+                public_media_enabled=bool(
+                    settings.get("public_media_enabled", True)
+                ),
+            )
         except (DirectorError, ValueError, TypeError) as exc:
             last_error = exc
             if attempt == 0:
