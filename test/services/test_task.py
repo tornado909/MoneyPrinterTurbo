@@ -343,6 +343,11 @@ class TestTaskService(unittest.TestCase):
                 "generate_final_videos",
                 return_value=(["final.mp4"], ["combined.mp4"], []),
             ) as final,
+            patch.object(
+                tm.asc_ai,
+                "final_quality_control",
+                return_value={"status": "passed", "passed": True},
+            ),
             patch.object(tm.utils, "check_ffmpeg_ready", return_value=True),
             patch.object(tm.sm, "state", state),
         ):
@@ -421,6 +426,11 @@ class TestTaskService(unittest.TestCase):
                 return_value=(["final.mp4"], ["combined.mp4"], []),
             ),
             patch.object(tm, "save_script_data"),
+            patch.object(
+                tm.asc_ai,
+                "final_quality_control",
+                return_value={"status": "passed", "passed": True},
+            ),
             patch.object(tm.utils, "check_ffmpeg_ready", return_value=True),
             patch.object(tm.sm, "state", state),
         ):
@@ -502,6 +512,11 @@ class TestTaskService(unittest.TestCase):
                 return_value=(["final.mp4"], ["combined.mp4"], []),
             ),
             patch.object(tm, "save_script_data"),
+            patch.object(
+                tm.asc_ai,
+                "final_quality_control",
+                return_value={"status": "passed", "passed": True},
+            ),
             patch.object(tm.utils, "check_ffmpeg_ready", return_value=True),
             patch.object(tm.sm, "state", state),
         ):
