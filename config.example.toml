@@ -669,19 +669,21 @@ director_temperature = 0.45
 director_max_tokens = 3500
 director_style = "cinematic documentary realism, clean composition"
 director_max_public_image_scenes = 2
-# Optional non-AI public asset router. Wikimedia Commons is queried only for
-# Director PUBLIC_IMAGE scenes and every accepted asset keeps license/author
-# provenance with a local-generation fallback.
-public_media_enabled = true
+# Optional non-AI public asset router. OFF by default to keep corporate topics
+# fully private. Enable globally or per task only when sending a scene search
+# query to Wikimedia Commons is acceptable. Every accepted asset keeps
+# license/author provenance with a local-generation fallback.
+public_media_enabled = false
 public_media_max_results = 6
 public_media_timeout_seconds = 12
 public_media_cache_ttl_seconds = 3600
 public_media_max_bytes = 20971520
 # Font used only for short Director overlay_text callouts baked into scene clips.
 director_overlay_font = "MicrosoftYaHeiBold.ttc"
-# Optional free public factual grounding. Only the video topic is sent to
-# MediaWiki; extracts and source URLs are stored in director-plan.json.
-public_research_enabled = true
+# Optional free public factual grounding. OFF by default for privacy. When
+# enabled, the video topic is sent to MediaWiki; extracts and source URLs are
+# stored in director-plan.json.
+public_research_enabled = false
 research_max_pages = 2
 research_max_chars_per_page = 1200
 research_timeout_seconds = 8
