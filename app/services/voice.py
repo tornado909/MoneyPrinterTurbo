@@ -2302,8 +2302,37 @@ def chatterbox_tts(
         )
         return None
 
+    tts_text = text
+    if language == "ru":
+        try:
+            from stressonnx import stress as add_stress
+
+            tts_text = add_stress(
+                text,
+                "ru",
+                model="ruaccent",
+                fallback=True,
+            )
+            logger.info(
+                "Chatterbox Russian stress preprocessing applied before synthesis"
+            )
+            logger.debug(f"Chatterbox stressed text: {tts_text}")
+        except Exception as exc:
+            logger.error(
+                "Chatterbox Russian stress preprocessing failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            return None
+
     return _openai_compatible_tts(
-        "chatterbox", base_url, api_key, model_id, voice, text, voice_rate, voice_file
+        "chatterbox",
+        base_url,
+        api_key,
+        model_id,
+        voice,
+        tts_text,
+        voice_rate,
+        voice_file,
     )
 
 
