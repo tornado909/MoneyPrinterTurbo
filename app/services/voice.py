@@ -211,24 +211,50 @@ def get_elevenlabs_voices(api_key: str) -> list[str]:
 
 
 def get_chatterbox_voices() -> list[str]:
-    """Return the configured Chatterbox voices.
+    """Return real voices exposed by the configured Chatterbox-compatible server.
 
-    Chatterbox is self-hosted, so there is no global voice catalog. Operators
-    list the voice names exposed by their server via ``[chatterbox] voices``
-    (a TOML array, or a comma-separated string). Each entry is normalised to
-    the ``chatterbox:<name>`` format used by the TTS dispatcher.
+    ASC-AI speech-tts owns the authoritative voice catalog. A static
+    [chatterbox] voices list remains only as a resilience fallback when the
+    service is temporarily unavailable.
     """
+    base_url = (
+        os.getenv("MPT_CHATTERBOX_BASE_URL")
+        or config.chatterbox.get("base_url", "")
+        or ""
+    ).strip().rstrip("/")
+    if base_url:
+        try:
+            response = requests.get(f"{base_url}/voices", timeout=5)
+            response.raise_for_status()
+            payload = response.json()
+            rows = payload.get("voices", []) if isinstance(payload, dict) else []
+            result = []
+            for row in rows:
+                name = row.get("name") if isinstance(row, dict) else None
+                if isinstance(name, str) and name.strip():
+                    value = f"chatterbox:{name.strip()}"
+                    if value not in result:
+                        result.append(value)
+            if result:
+                return result
+        except Exception as exc:
+            logger.warning(
+                f"Chatterbox voice catalog unavailable ({type(exc).__name__}); "
+                "falling back to configured voices"
+            )
+
     voices = config.chatterbox.get("voices", []) or []
     if isinstance(voices, str):
         voices = [v.strip() for v in voices.split(",") if v.strip()]
     result = []
-    for v in voices:
-        v = str(v).strip()
-        if not v:
+    for value in voices:
+        value = str(value).strip()
+        if not value:
             continue
-        result.append(v if v.startswith("chatterbox:") else f"chatterbox:{v}")
+        normalized = value if value.startswith("chatterbox:") else f"chatterbox:{value}"
+        if normalized not in result:
+            result.append(normalized)
     return result
-
 
 KOKORO_DEFAULT_VOICE = "af_heart"
 
@@ -2326,7 +2352,7 @@ def chatterbox_tts(
         or (selected.get("metadata") or {}).get("language")
         or ""
     ).strip().lower()
-    if voice.startswith("ru-") and language != "ru":
+    if voice.startswith(("ru-", "ru_")) and language != "ru":
         logger.error(
             f"Chatterbox voice '{voice}' is not registered with language=ru"
         )
