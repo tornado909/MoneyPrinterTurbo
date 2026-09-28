@@ -13,9 +13,9 @@ x-asc-ai-env: &asc-ai-env
   ASC_AI_CHARACTER_HUB_URL: http://character-chat:8096
   ASC_AI_SCHEDULER_URL: http://gpu-scheduler:8090
   ASC_AI_PROMPT_LLM_URL: http://prompt-llm-local:8080
-  # Run the official local Chatterbox OpenAI-compatible server on host port
-  # 4123. Override MPT_CHATTERBOX_BASE_URL if you expose it elsewhere.
-  MPT_CHATTERBOX_BASE_URL: ${MPT_CHATTERBOX_BASE_URL:-http://host.docker.internal:4123/v1}
+  # ASC-AI owns Chatterbox GPU execution behind GPU Scheduler admission.
+  # The service remains OpenAI speech compatible for MoneyPrinterTurbo.
+  MPT_CHATTERBOX_BASE_URL: ${MPT_CHATTERBOX_BASE_URL:-http://speech-tts:8097/v1}
   MPT_APP_ENABLE_REDIS: "true"
   MPT_APP_REDIS_HOST: redis
   # Hugging Face cache is persisted on the ASC-AI host; HF_TOKEN itself is
