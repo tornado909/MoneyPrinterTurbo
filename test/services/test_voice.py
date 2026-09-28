@@ -858,9 +858,9 @@ class TestVoiceService(unittest.TestCase):
                 ["chatterbox:alpha", "chatterbox:beta"],
             )
 
-        # with nothing configured the dropdown still gets a usable default
+        # Never invent a voice that is not present on the Chatterbox server.
         with patch.object(vs.config, "chatterbox", {}):
-            self.assertEqual(vs.get_chatterbox_voices(), ["chatterbox:ru-default"])
+            self.assertEqual(vs.get_chatterbox_voices(), [])
 
     def test_chatterbox_tts_posts_to_openai_compatible_endpoint(self):
         """Success path: POST /audio/speech, write audio, return legacy SubMaker."""
@@ -884,6 +884,13 @@ class TestVoiceService(unittest.TestCase):
             captured["headers"] = headers
             return _FakeResponse()
 
+        class _CatalogResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"voices": [{"name": "default", "language": "en", "aliases": []}]}
+
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
             vs.config,
             "chatterbox",
@@ -892,6 +899,8 @@ class TestVoiceService(unittest.TestCase):
                 "api_key": "secret",
                 "model_id": "chatterbox",
             },
+        ), patch.object(
+            vs.requests, "get", return_value=_CatalogResponse()
         ), patch.object(
             vs.requests, "post", side_effect=_fake_post
         ) as post, patch.object(
@@ -923,6 +932,62 @@ class TestVoiceService(unittest.TestCase):
         self.assertIsNotNone(sub_maker)
         self.assertTrue(getattr(sub_maker, "subs", []))
 
+    def test_chatterbox_tts_stresses_russian_text_before_post(self):
+        """Russian Chatterbox voices must receive accented text, not the raw script."""
+
+        class _CatalogResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"voices": [{"name": "ru_man1", "language": "ru", "aliases": []}]}
+
+        class _SpeechResponse:
+            status_code = 200
+            content = b"RIFF-fake-wav"
+            text = ""
+
+        class _FakeClip:
+            duration = 2.0
+
+            def close(self):
+                pass
+
+        captured = {}
+
+        def _fake_stress(text, language, model=None, fallback=False):
+            self.assertEqual(text, "замок стоит на горе")
+            self.assertEqual(language, "ru")
+            self.assertEqual(model, "ruaccent")
+            self.assertTrue(fallback)
+            return "за́мок сто́ит на горе́"
+
+        def _fake_post(url, json=None, headers=None, timeout=None):
+            captured["json"] = json
+            return _SpeechResponse()
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
+            vs.config,
+            "chatterbox",
+            {"base_url": "http://localhost:4123/v1", "model_id": "chatterbox"},
+        ), patch.object(
+            vs.requests, "get", return_value=_CatalogResponse()
+        ), patch.object(
+            vs.requests, "post", side_effect=_fake_post
+        ), patch.object(
+            vs, "AudioFileClip", return_value=_FakeClip()
+        ), patch.dict(
+            sys.modules, {"stressonnx": SimpleNamespace(stress=_fake_stress)}
+        ):
+            result = vs.chatterbox_tts(
+                text="замок стоит на горе",
+                voice="ru_man1",
+                voice_file=str(Path(tmp_dir) / "ru.wav"),
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(captured["json"]["input"], "за́мок сто́ит на горе́")
+
     def test_chatterbox_tts_requires_base_url(self):
         """Missing base_url short-circuits without any network call."""
         with patch.object(
@@ -942,8 +1007,17 @@ class TestVoiceService(unittest.TestCase):
             content = b""
             text = "boom"
 
+        class _CatalogResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"voices": [{"name": "default", "language": "en", "aliases": []}]}
+
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
             vs.config, "chatterbox", {"base_url": "http://localhost:4123/v1"}
+        ), patch.object(
+            vs.requests, "get", return_value=_CatalogResponse()
         ), patch.object(
             vs.requests, "post", return_value=_FakeResponse()
         ) as post:
@@ -1007,6 +1081,13 @@ class TestVoiceService(unittest.TestCase):
             content = b"fake-mp3"
             text = ""
 
+        class _CatalogResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"voices": [{"name": "default", "language": "en", "aliases": []}]}
+
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             out = f.name
         try:
@@ -1016,6 +1097,7 @@ class TestVoiceService(unittest.TestCase):
                     "chatterbox",
                     {"base_url": "http://localhost:4123", "api_key": "", "model_id": "chatterbox"},
                 ),
+                patch.object(vs.requests, "get", return_value=_CatalogResponse()),
                 patch.object(vs.requests, "post", return_value=_OkResponse()),
                 patch.object(vs, "AudioFileClip", side_effect=lambda _: BrokenClip()),
             ):
