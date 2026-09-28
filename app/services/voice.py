@@ -2326,7 +2326,13 @@ def chatterbox_tts(
     try:
         catalog = requests.get(f"{base_url}/voices", timeout=5)
         catalog.raise_for_status()
-        rows = (catalog.json() or {}).get("voices") or []
+        catalog_payload = catalog.json() or {}
+        rows = catalog_payload.get("voices") or []
+        preprocessing = (
+            catalog_payload.get("preprocessing")
+            if isinstance(catalog_payload, dict)
+            else {}
+        ) or {}
         selected = next(
             (
                 row
@@ -2359,7 +2365,13 @@ def chatterbox_tts(
         return None
 
     tts_text = text
-    if language == "ru":
+    server_ru_stress = str(preprocessing.get("ru_stress") or "").strip().lower()
+    if language == "ru" and server_ru_stress == "ruaccent":
+        logger.info(
+            "Chatterbox server advertises centralized RUAccent preprocessing; "
+            "sending original Russian text"
+        )
+    elif language == "ru":
         try:
             from stressonnx import stress as add_stress
 
@@ -2370,7 +2382,7 @@ def chatterbox_tts(
                 fallback=True,
             )
             logger.info(
-                "Chatterbox Russian stress preprocessing applied before synthesis"
+                "Chatterbox Russian stress preprocessing applied locally as fallback"
             )
             logger.debug(f"Chatterbox stressed text: {tts_text}")
         except Exception as exc:
