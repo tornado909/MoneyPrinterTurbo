@@ -862,6 +862,38 @@ class TestVoiceService(unittest.TestCase):
         with patch.object(vs.config, "chatterbox", {}):
             self.assertEqual(vs.get_chatterbox_voices(), [])
 
+    def test_get_chatterbox_voices_reads_live_catalog(self):
+        class _CatalogResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "voices": [
+                        {"name": "ru_man1", "language": "ru"},
+                        {"name": "ru_man2", "language": "ru"},
+                        {"name": "ru_woman1", "language": "ru"},
+                    ]
+                }
+
+        with patch.dict(
+            os.environ,
+            {"MPT_CHATTERBOX_BASE_URL": "http://speech-tts:8097/v1"},
+        ), patch.object(
+            vs.requests, "get", return_value=_CatalogResponse()
+        ) as get:
+            self.assertEqual(
+                vs.get_chatterbox_voices(),
+                [
+                    "chatterbox:ru_man1",
+                    "chatterbox:ru_man2",
+                    "chatterbox:ru_woman1",
+                ],
+            )
+        get.assert_called_once_with(
+            "http://speech-tts:8097/v1/voices", timeout=5
+        )
+
     def test_chatterbox_tts_posts_to_openai_compatible_endpoint(self):
         """Success path: POST /audio/speech, write audio, return legacy SubMaker."""
 
@@ -960,7 +992,7 @@ class TestVoiceService(unittest.TestCase):
             self.assertEqual(language, "ru")
             self.assertEqual(model, "ruaccent")
             self.assertTrue(fallback)
-            return "за́мок сто́ит на горе́"
+            return "за́мок стои́т на горе́"
 
         def _fake_post(url, json=None, headers=None, timeout=None):
             captured["json"] = json
@@ -986,7 +1018,7 @@ class TestVoiceService(unittest.TestCase):
             )
 
         self.assertIsNotNone(result)
-        self.assertEqual(captured["json"]["input"], "за́мок сто́ит на горе́")
+        self.assertEqual(captured["json"]["input"], "за́мок стои́т на горе́")
 
     def test_chatterbox_long_cpu_read_timeout_is_not_retried(self):
         """Long local Chatterbox synthesis gets a long read timeout and no duplicate retry."""
