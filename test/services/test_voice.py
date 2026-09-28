@@ -988,6 +988,45 @@ class TestVoiceService(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(captured["json"]["input"], "за́мок сто́ит на горе́")
 
+    def test_chatterbox_long_cpu_read_timeout_is_not_retried(self):
+        """Long local Chatterbox synthesis gets a long read timeout and no duplicate retry."""
+
+        class _CatalogResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"voices": [{"name": "default", "language": "en", "aliases": []}]}
+
+        seen_timeouts = []
+
+        def _timeout_post(url, json=None, headers=None, timeout=None):
+            seen_timeouts.append(timeout)
+            raise vs.requests.ReadTimeout("slow local synthesis")
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
+            vs.config,
+            "chatterbox",
+            {
+                "base_url": "http://localhost:4123/v1",
+                "model_id": "chatterbox",
+                "read_timeout_seconds": 900,
+            },
+        ), patch.object(
+            vs.requests, "get", return_value=_CatalogResponse()
+        ), patch.object(
+            vs.requests, "post", side_effect=_timeout_post
+        ) as post:
+            result = vs.chatterbox_tts(
+                text="A sufficiently long local synthesis request.",
+                voice="default",
+                voice_file=str(Path(tmp_dir) / "slow.wav"),
+            )
+
+        self.assertIsNone(result)
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(seen_timeouts, [(10.0, 900.0)])
+
     def test_chatterbox_tts_requires_base_url(self):
         """Missing base_url short-circuits without any network call."""
         with patch.object(
