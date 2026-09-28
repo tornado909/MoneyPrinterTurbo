@@ -581,16 +581,16 @@ music_model_id = "music_v2"
 music_timeout = 600
 
 [chatterbox]
-# OpenAI-compatible Chatterbox TTS server. The defaults target
-# travisvn/chatterbox-tts-api running locally on port 4123.
+# OpenAI-compatible Chatterbox endpoint. In ASC-AI production this resolves to
+# the scheduler-owned GPU speech-tts service via MPT_CHATTERBOX_BASE_URL.
 base_url = "http://127.0.0.1:4123/v1"
 api_key = ""
 model_id = "tts-1"
-# Voice names exposed by the configured Chatterbox server.
-# The ASC-AI Russian production path requires ru-default to be uploaded with
-# language=ru; scripts/bootstrap-chatterbox-ru-voice.sh does this idempotently.
-voices = ["ru-default"]
-default_voice = "ru-default"
+# Real voices are discovered from GET {base_url}/voices. Keep this list only as
+# an offline fallback for deployments whose server cannot expose a catalog.
+voices = []
+default_voice = ""
+read_timeout_seconds = 900
 
 [kokoro]
 # OpenAI-compatible Kokoro TTS server (hexgrad/Kokoro-82M, Apache-2.0, runs on CPU).
