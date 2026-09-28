@@ -1020,6 +1020,63 @@ class TestVoiceService(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(captured["json"]["input"], "за́мок стои́т на горе́")
 
+    def test_chatterbox_tts_defers_russian_stress_to_server_capability(self):
+        """ASC-AI RUAccent capability must prevent duplicate local stress passes."""
+
+        class _CatalogResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "voices": [
+                        {"name": "ru_woman1", "language": "ru", "aliases": []}
+                    ],
+                    "preprocessing": {"ru_stress": "ruaccent"},
+                }
+
+        class _SpeechResponse:
+            status_code = 200
+            content = b"RIFF-fake-wav"
+            text = ""
+
+        class _FakeClip:
+            duration = 2.0
+
+            def close(self):
+                pass
+
+        captured = {}
+
+        def _fake_post(url, json=None, headers=None, timeout=None):
+            captured["json"] = json
+            return _SpeechResponse()
+
+        def _must_not_run(*args, **kwargs):
+            raise AssertionError("local stressonnx must not run for ASC-AI RUAccent")
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
+            vs.config,
+            "chatterbox",
+            {"base_url": "http://speech-tts:8097/v1", "model_id": "chatterbox"},
+        ), patch.object(
+            vs.requests, "get", return_value=_CatalogResponse()
+        ), patch.object(
+            vs.requests, "post", side_effect=_fake_post
+        ), patch.object(
+            vs, "AudioFileClip", return_value=_FakeClip()
+        ), patch.dict(
+            sys.modules, {"stressonnx": SimpleNamespace(stress=_must_not_run)}
+        ):
+            result = vs.chatterbox_tts(
+                text="замок стоит на горе",
+                voice="ru_woman1",
+                voice_file=str(Path(tmp_dir) / "ru.wav"),
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(captured["json"]["input"], "замок стоит на горе")
+
     def test_chatterbox_long_cpu_read_timeout_is_not_retried(self):
         """Long local Chatterbox synthesis gets a long read timeout and no duplicate retry."""
 
