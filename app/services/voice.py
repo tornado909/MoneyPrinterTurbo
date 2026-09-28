@@ -2171,6 +2171,24 @@ def _openai_compatible_tts(
     }
     # OpenAI speech 协议没有音量字段；最终混音阶段应用 voice_volume。
     # speed 仅调节语速，不能作为音量参数使用。
+    #
+    # Chatterbox runs locally on CPU in ASC-AI and long synthesis can easily
+    # exceed two minutes. A single scalar timeout applies to both connect and
+    # read phases, so the previous 120-second value killed healthy jobs and
+    # retried the same expensive synthesis from scratch.
+    if provider == "chatterbox":
+        try:
+            chatterbox_read_timeout = float(
+                os.getenv("MPT_CHATTERBOX_READ_TIMEOUT_SECONDS")
+                or config.chatterbox.get("read_timeout_seconds", 900)
+                or 900
+            )
+        except (TypeError, ValueError):
+            chatterbox_read_timeout = 900.0
+        chatterbox_read_timeout = max(30.0, min(3600.0, chatterbox_read_timeout))
+        request_timeout = (10.0, chatterbox_read_timeout)
+    else:
+        request_timeout = 120
 
     for i in range(3):
         temporary_audio = None
@@ -2178,7 +2196,12 @@ def _openai_compatible_tts(
             logger.info(f"start {provider} tts, voice: {voice}, try: {i + 1}")
             ensure_file_path_exists(voice_file)
 
-            response = requests.post(url, json=payload, headers=headers, timeout=120)
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=request_timeout,
+            )
             if response.status_code != 200:
                 logger.error(
                     f"{provider} tts failed with status {response.status_code}: {response.text[:200]}"
@@ -2213,6 +2236,13 @@ def _openai_compatible_tts(
                 text=text,
                 audio_duration_seconds=audio_duration,
             )
+        except requests.ReadTimeout as e:
+            logger.error(f"{provider} tts read timed out: {str(e)}")
+            # Do not submit the same long Chatterbox synthesis again. The local
+            # server may still be finishing the first request after the client
+            # gives up waiting, so automatic retries can multiply CPU work.
+            if provider == "chatterbox":
+                break
         except Exception as e:
             logger.error(f"{provider} tts failed: {str(e)}")
         finally:
